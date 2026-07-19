@@ -1,0 +1,293 @@
+import fs from "fs";
+import { SPARKS_JSON_PATH, LLM_PORT } from "../config.js";
+import { loadSecrets, saveSecrets } from "../secretsStore.js";
+
+/**
+ * SparkRegistry — loads, persists, and emits change events for the Spark list.
+ * Single source of truth for `sparks.json`.
+ *
+ * SSH passwords:
+ *  - Never written to sparks.json
+ *  - Never returned by public API helpers (hasPassword only)
+ *  - Held in memory for SSH collectors
+ *  - Encrypted at rest in config/sparks-secrets.json (survives Docker restart)
+ */
+export class SparkRegistry {
+  constructor() {
+    this._sparks = [];
+    /** @type {Map<string, string>} sparkId -> password */
+    this._passwords = new Map();
+    this._listeners = new Set();
+    this._load();
+  }
+
+  // ─── Accessors ──────────────────────────────────────────
+  get sparks() {
+    return this._sparks.map((s) => this._withPassword(s));
+  }
+
+  /** Public-safe list (no secrets). */
+  get publicSparks() {
+    return this._sparks.map((s) => this.toPublic(s));
+  }
+
+  get sparkIds() {
+    return this._sparks.map((s) => s.id);
+  }
+
+  /** Find a Spark by ID (includes in-memory password if present). */
+  getSpark(id) {
+    const s = this._sparks.find((s) => s.id === id) || null;
+    return s ? this._withPassword(s) : null;
+  }
+
+  /** Redact secrets for API responses. */
+  toPublic(spark) {
+    if (!spark) return spark;
+    const ssh = { ...(spark.ssh || {}) };
+    delete ssh.password;
+    // Always expose whether a secret is available (for Edit UI after restart)
+    if (ssh.auth === "pass" || this._passwords.has(spark.id)) {
+      ssh.hasPassword = this._passwords.has(spark.id);
+    }
+    return { ...spark, ssh };
+  }
+
+  // ─── CRUD ───────────────────────────────────────────────
+  /** Add a new Spark. Throws if ID already exists. */
+  addSpark(config) {
+    if (!config.id) throw new Error("Spark config must have an 'id'");
+    if (this.getSpark(config.id)) throw new Error(`Spark ${config.id} already exists`);
+    const spark = this._normalizeConfig(config);
+    this._storePassword(spark.id, config?.ssh?.password);
+    this._sparks.push(spark);
+    this._save();
+    this._emit("add", this._withPassword(spark));
+    return this._withPassword(spark);
+  }
+
+  /** Update an existing Spark by ID. Does not allow changing `id`. */
+  updateSpark(id, updates) {
+    const idx = this._sparks.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error(`Spark ${id} not found`);
+
+    const { id: _ignoreId, ...safeUpdates } = updates || {};
+    const prev = this._sparks[idx];
+
+    // Merge ssh carefully so we don't drop auth fields
+    let mergedSsh = prev.ssh;
+    if (safeUpdates.ssh) {
+      mergedSsh = { ...prev.ssh, ...safeUpdates.ssh };
+      if (Object.prototype.hasOwnProperty.call(safeUpdates.ssh, "password")) {
+        this._storePassword(id, safeUpdates.ssh.password);
+      }
+      delete mergedSsh.password;
+    }
+
+    const updated = {
+      ...prev,
+      ...safeUpdates,
+      id, // never overwrite id
+      ssh: mergedSsh,
+    };
+    this._sparks[idx] = this._normalizeConfig(updated);
+    this._save();
+    this._emit("update", this._withPassword(this._sparks[idx]));
+    return this._withPassword(this._sparks[idx]);
+  }
+
+  /** Remove a Spark by ID. Returns removed Spark or null. */
+  removeSpark(id) {
+    const idx = this._sparks.findIndex((s) => s.id === id);
+    if (idx === -1) return null;
+    const removed = this._sparks.splice(idx, 1)[0];
+    if (this._passwords.has(id)) {
+      this._passwords.delete(id);
+      this._persistSecrets();
+    }
+    this._save();
+    this._emit("remove", removed);
+    return this.toPublic(removed);
+  }
+
+  /**
+   * Reorder Sparks. `orderedIds` is the full desired id sequence.
+   * Unknown ids are ignored; any missing registered Sparks are appended.
+   * @param {string[]} orderedIds
+   * @returns {object[]} public sparks in new order
+   */
+  reorderSparks(orderedIds) {
+    if (!Array.isArray(orderedIds)) throw new Error("order must be an array of spark ids");
+    const byId = new Map(this._sparks.map((s) => [s.id, s]));
+    const seen = new Set();
+    const next = [];
+    for (const id of orderedIds) {
+      if (typeof id !== "string" || !byId.has(id) || seen.has(id)) continue;
+      next.push(byId.get(id));
+      seen.add(id);
+    }
+    for (const s of this._sparks) {
+      if (!seen.has(s.id)) next.push(s);
+    }
+    this._sparks = next;
+    this._save();
+    this._emit("reorder", null);
+    return this.publicSparks;
+  }
+
+  // ─── Events ─────────────────────────────────────────────
+  /** Register a listener: fn(action, spark) where action is 'add'|'update'|'remove' */
+  onChange(fn) {
+    this._listeners.add(fn);
+    return () => this._listeners.delete(fn);
+  }
+
+  // ─── Persistence ────────────────────────────────────────
+  _load() {
+    // Load encrypted secrets first (survives restart)
+    try {
+      this._passwords = loadSecrets();
+    } catch (err) {
+      console.error("[SparkRegistry] secrets load failed:", err.message);
+      this._passwords = new Map();
+    }
+
+    try {
+      const raw = fs.readFileSync(SPARKS_JSON_PATH, "utf-8");
+      const data = JSON.parse(raw);
+      const loaded = data.sparks || [];
+      this._sparks = [];
+      let migratedSecrets = false;
+      for (const s of loaded) {
+        // Migrate: pull plaintext passwords into encrypted store, strip from disk
+        if (s?.ssh?.password) {
+          this._passwords.set(s.id, s.ssh.password);
+          migratedSecrets = true;
+          console.warn(
+            `[SparkRegistry] Migrated password for ${s.id} from sparks.json into encrypted secrets store; ` +
+              `rotate this credential if it was previously exposed.`
+          );
+        }
+        this._sparks.push(this._normalizeConfig(s));
+      }
+      if (migratedSecrets || loaded.some((s) => s?.ssh?.password)) {
+        this._persistSecrets();
+        this._save(); // rewrite sparks.json without passwords
+      }
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        this._sparks = [];
+        this._save();
+      } else {
+        console.error("[SparkRegistry] Failed to load sparks.json:", err.message);
+        this._sparks = [];
+      }
+    }
+  }
+
+  _save() {
+    try {
+      // Never write passwords to sparks.json
+      const sparks = this._sparks.map((s) => {
+        const ssh = { ...(s.ssh || {}) };
+        delete ssh.password;
+        delete ssh.hasPassword;
+        return { ...s, ssh };
+      });
+      const data = { sparks };
+      fs.writeFileSync(SPARKS_JSON_PATH, JSON.stringify(data, null, 2) + "\n", "utf-8");
+    } catch (err) {
+      console.error("[SparkRegistry] Failed to save sparks.json:", err.message);
+    }
+  }
+
+  // ─── Internal ───────────────────────────────────────────
+  _emit(action, spark) {
+    for (const fn of this._listeners) {
+      try {
+        fn(action, spark);
+      } catch (err) {
+        console.error("[SparkRegistry] Listener error:", err);
+      }
+    }
+  }
+
+  /**
+   * Store / clear password. Always persists to encrypted secrets file.
+   * Host being offline does not matter — credentials are local.
+   * @param {string} id
+   * @param {string|null|undefined} password  null/undefined = no-op; "" = clear
+   */
+  _storePassword(id, password) {
+    if (password == null) return;
+    if (password === "") {
+      if (this._passwords.has(id)) {
+        this._passwords.delete(id);
+        this._persistSecrets();
+      }
+      return;
+    }
+    this._passwords.set(id, String(password));
+    this._persistSecrets();
+  }
+
+  /** Public helper: set password without other config changes (e.g. from Test / Edit). */
+  setPassword(id, password) {
+    if (!this._sparks.find((s) => s.id === id)) throw new Error(`Spark ${id} not found`);
+    this._storePassword(id, password);
+    return this.toPublic(this.getSpark(id));
+  }
+
+  hasPassword(id) {
+    return this._passwords.has(id);
+  }
+
+  _persistSecrets() {
+    try {
+      saveSecrets(this._passwords);
+    } catch (err) {
+      console.error("[SparkRegistry] Failed to persist secrets:", err.message);
+      throw err; // surface to API so the UI can show it
+    }
+  }
+
+  _withPassword(spark) {
+    if (!spark) return spark;
+    const password = this._passwords.get(spark.id);
+    if (!password) return { ...spark, ssh: { ...spark.ssh } };
+    return {
+      ...spark,
+      ssh: { ...spark.ssh, password },
+    };
+  }
+
+  _normalizeConfig(config) {
+    const sshIn = config.ssh || {};
+    const ssh = {
+      host: sshIn.host || "",
+      user: sshIn.user || "root",
+      auth: sshIn.auth === "pass" ? "pass" : "key",
+    };
+    const llmPort = this._normalizeLlmPort(config.llmPort);
+    // Never keep password on the persisted object
+    return {
+      id: config.id,
+      name: config.name || config.id,
+      lanIp: config.lanIp || "",
+      cx7Ip: config.cx7Ip || null,
+      isLocal: Boolean(config.isLocal),
+      ssh,
+      llmPort,
+      disabledDevices: Array.isArray(config.disabledDevices) ? config.disabledDevices : [],
+      disabledInterfaces: Array.isArray(config.disabledInterfaces) ? config.disabledInterfaces : [],
+      storagePollDisabled: Boolean(config.storagePollDisabled),
+    };
+  }
+
+  /** Valid port 1–65535, else default LLM_PORT. */
+  _normalizeLlmPort(value) {
+    const n = typeof value === "string" ? parseInt(value, 10) : Number(value);
+    if (Number.isInteger(n) && n >= 1 && n <= 65535) return n;
+    return LLM_PORT;
+  }
+}

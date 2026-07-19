@@ -1,0 +1,397 @@
+/**
+ * LlmProbe — probes an LLM server on port 8888, auto-detects backend,
+ * computes live tokens/sec (generation + prefill).
+ *
+ * Ported from legacy `probeLlamaServerType` and `_getLlamaMetricsFor`.
+ */
+import { LLM_PROBE_TIMEOUT_MS } from "../config.js";
+
+const FAIL_RESET_THRESHOLD = 3;
+const REDETECT_INTERVAL_MS = 60_000;
+
+export class LlmProbe {
+  constructor(spark, port = 8888) {
+    this.spark = spark;
+    this.port = port;
+    this.baseUrl = `http://${spark.lanIp}:${port}`;
+
+    // State
+    this.backendType = null; // 'vllm' | 'llama.cpp' | 'sglang' | null
+    this.serverIsOpenAI = null; // true = OpenAI-compatible
+    this.stepId = 0;
+    this.modelId = null;
+    this.modelPath = null;
+    this.contextLength = null;
+    this.gpuMemoryUtilization = null;
+    this.slotsActive = 0;
+    this.slotsTotal = 0;
+    this.generationTps = 0;
+    this.prefillTps = 0;
+    this.error = null;
+
+    // Per-slot rate tracking (for llama.cpp native path)
+    this.slotState = new Map();
+    this.lastTokenCounts = { input: 0, output: 0 };
+    this.lastProbeTime = 0;
+
+    this._consecutiveFailures = 0;
+    this._lastDetectAt = 0;
+  }
+
+  /** Update probe port (and host from spark). Resets detection when the target changes. */
+  setPort(port) {
+    const next = Number(port);
+    const prevUrl = this.baseUrl;
+    if (Number.isInteger(next) && next >= 1 && next <= 65535) {
+      this.port = next;
+    }
+    this.baseUrl = `http://${this.spark.lanIp}:${this.port}`;
+    if (this.baseUrl !== prevUrl) {
+      this._resetDetection();
+      this._lastDetectAt = 0;
+      this._consecutiveFailures = 0;
+    }
+  }
+
+  /** Probe the LLM server and return a snapshot. */
+  async probe() {
+    try {
+      const shouldDetect =
+        this.serverIsOpenAI === null ||
+        Date.now() - this._lastDetectAt > REDETECT_INTERVAL_MS;
+
+      if (shouldDetect) {
+        await this._detectServerType();
+        this._lastDetectAt = Date.now();
+      }
+
+      if (this.serverIsOpenAI === false) {
+        const snap = await this._probeLlamaCpp();
+        this._noteSuccess();
+        return snap;
+      } else if (this.serverIsOpenAI === true) {
+        const snap = await this._probeOpenAICompatible();
+        this._noteSuccess();
+        return snap;
+      } else {
+        this._noteFailure("LLM server not reachable");
+        return this._defaultLlm();
+      }
+    } catch (err) {
+      this._noteFailure(err.message);
+      return this._defaultLlm();
+    }
+  }
+
+  _noteSuccess() {
+    this._consecutiveFailures = 0;
+    this.error = null;
+  }
+
+  _noteFailure(message) {
+    this.error = message;
+    this._consecutiveFailures += 1;
+    if (this._consecutiveFailures >= FAIL_RESET_THRESHOLD) {
+      this._resetDetection();
+    }
+  }
+
+  _resetDetection() {
+    this.serverIsOpenAI = null;
+    this.backendType = null;
+    this.modelId = null;
+    this.modelPath = null;
+    this.generationTps = 0;
+    this.prefillTps = 0;
+    this.contextLength = null;
+    this.gpuMemoryUtilization = null;
+    this.slotsActive = 0;
+    this.slotsTotal = 0;
+    this.slotState.clear();
+    this.lastTokenCounts = { input: 0, output: 0 };
+  }
+
+  // ─── Server type detection ───────────────────────────────
+  async _detectServerType() {
+    const slotUrl = `${this.baseUrl}/slots`;
+    try {
+      const slotRes = await this._fetch(slotUrl);
+      if (slotRes.ok) {
+        const slots = await slotRes.json();
+        if (Array.isArray(slots)) {
+          this.serverIsOpenAI = false;
+          this.backendType = "llama.cpp";
+          return;
+        }
+      }
+    } catch {}
+
+    // Try OpenAI-compatible
+    try {
+      const modelRes = await this._fetch(`${this.baseUrl}/v1/models`);
+      if (modelRes.ok) {
+        this.serverIsOpenAI = true;
+        this.backendType = "vllm";
+        return;
+      }
+    } catch {}
+
+    this.serverIsOpenAI = null;
+    this.backendType = null;
+  }
+
+  // ─── OpenAI-compatible path (vLLM/sglang) ────────────────
+  async _probeOpenAICompatible() {
+    const now = Date.now();
+    const dtSec = (now - this.lastProbeTime) / 1000;
+    this.lastProbeTime = now;
+
+    // Model info from /v1/models — failure means server is down
+    let modelsOk = false;
+    try {
+      const modelsRes = await this._fetch(`${this.baseUrl}/v1/models`);
+      if (modelsRes.ok) {
+        modelsOk = true;
+        const modelsData = await modelsRes.json();
+        const model = modelsData?.data?.[0];
+        this.modelId = model?.id || null;
+	        this.contextLength = model?.max_model_len || null;
+	      }
+    } catch {}
+
+    if (!modelsOk) {
+      throw new Error("OpenAI-compatible /v1/models unreachable");
+    }
+
+    // Try sglang /get_server_info
+    let isSglang = false;
+    try {
+      const sgRes = await this._fetch(`${this.baseUrl}/get_server_info`);
+      if (sgRes.ok) {
+        isSglang = true;
+        const sgData = await sgRes.json();
+        this.contextLength = sgData.max_total_tokens || sgData.context_length || this.contextLength;
+        if (sgData.total_input_tokens != null && sgData.total_output_tokens != null) {
+          const deltaIn = sgData.total_input_tokens - this.lastTokenCounts.input;
+          const deltaOut = sgData.total_output_tokens - this.lastTokenCounts.output;
+          this.lastTokenCounts.input = sgData.total_input_tokens;
+          this.lastTokenCounts.output = sgData.total_output_tokens;
+          if (dtSec > 0 && dtSec < 10) {
+            this.generationTps = Math.max(0, Math.round((deltaOut / dtSec) * 100) / 100);
+            this.prefillTps = Math.max(0, Math.round((deltaIn / dtSec) * 100) / 100);
+          }
+        }
+      }
+    } catch {}
+
+    if (!isSglang) {
+      // Try Prometheus /metrics for vLLM
+      try {
+        const metricsRes = await this._fetch(`${this.baseUrl}/metrics`);
+        if (metricsRes.ok) {
+          const metricsText = await metricsRes.text();
+          const promptTokens = this._getVllmMetric(metricsText, "prompt_tokens_total");
+          const genTokens = this._getVllmMetric(metricsText, "generation_tokens_total");
+          if (promptTokens != null && genTokens != null) {
+            const deltaIn = promptTokens - this.lastTokenCounts.input;
+            const deltaOut = genTokens - this.lastTokenCounts.output;
+            this.lastTokenCounts.input = promptTokens;
+            this.lastTokenCounts.output = genTokens;
+            if (dtSec > 0 && dtSec < 10) {
+              this.generationTps = Math.max(0, Math.round((deltaOut / dtSec) * 100) / 100);
+              this.prefillTps = Math.max(0, Math.round((deltaIn / dtSec) * 100) / 100);
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // Try vLLM internal model info
+    if (!isSglang) {
+      // Try known vLLM internal endpoints (may 404 on older versions)
+      const endpoints = [
+        "/v1/internal/model_info",
+        "/v1/debug/model_info",
+        "/v1/debug/serve_config",
+        "/internal/model_info",
+        "/debug/model_info",
+        "/debug/serve_config",
+        "/v1/model_info",
+        "/v1/model-info",
+      ];
+      for (const ep of endpoints) {
+        try {
+          const infoRes = await this._fetch(`${this.baseUrl}${ep}`);
+          if (!infoRes.ok) continue;
+          const info = await infoRes.json();
+
+          if (this.contextLength == null) {
+            this.contextLength = info.max_model_len || info.max_context_length || null;
+          }
+
+          const maxSeqs = info.max_num_seqs || info.max_num_sequences || info.scheduler_max_num_seqs;
+          if (maxSeqs != null) this.slotsTotal = maxSeqs;
+
+          const gpuMem = info.gpu_memory_utilization ?? info.gpu_memory_usage ?? info.gpu_utilisation;
+          if (gpuMem != null) this.gpuMemoryUtilization = gpuMem;
+
+          break;
+        } catch {}
+      }
+
+      // Fallback: Prometheus /metrics for whatever internal endpoints didn't provide
+      try {
+        const mRes = await this._fetch(`${this.baseUrl}/metrics`);
+        if (mRes.ok) {
+	          const txt = await mRes.text();
+
+	          // Running requests as slotsActive
+	          const running = this._getVllmMetric(txt, "num_requests_running");
+	          if (running != null) this.slotsActive = Math.round(running);
+
+          // Engine sleep state (0 = active, 1 = sleeping)
+          if (this.gpuMemoryUtilization == null) {
+            const sleepState = this._getVllmMetric(txt, "engine_sleep_state");
+            if (sleepState != null) this.gpuMemoryUtilization = sleepState;
+          }
+        }
+      } catch {}
+    }
+
+    this.backendType = isSglang ? "sglang" : "vllm";
+
+    return this._getSnapshot();
+  }
+
+  // ─── llama.cpp native path ────────────────────────────────
+  async _probeLlamaCpp() {
+    const now = Date.now();
+    const dtSec = (now - this.lastProbeTime) / 1000;
+    this.lastProbeTime = now;
+
+    // Slots
+    let slotsOk = false;
+    try {
+      const slotsRes = await this._fetch(`${this.baseUrl}/slots`);
+      if (slotsRes.ok) {
+        const slots = await slotsRes.json();
+        if (Array.isArray(slots)) {
+          slotsOk = true;
+          this.slotsTotal = slots.length;
+          // Some llama.cpp builds use is_processing instead of state
+          this.slotsActive = slots.filter((s) => s.is_processing || (s.state && s.state !== "idle")).length;
+
+          let totalGen = 0;
+          let totalPrefill = 0;
+
+          for (const slot of slots) {
+            const slotId = slot.id ?? "default";
+            const decoded = this._getSlotDecoded(slot);
+            const prompted = this._getSlotPrefilled(slot);
+            const lastState = this.slotState.get(slotId) || { decoded: 0, prompted: 0 };
+            const dDecoded = decoded - lastState.decoded;
+            const dPrompted = prompted - lastState.prompted;
+            this.slotState.set(slotId, { decoded, prompted });
+            if (dtSec > 0 && dtSec < 10) {
+              totalGen += dDecoded / dtSec;
+              totalPrefill += dPrompted / dtSec;
+            }
+          }
+
+          this.generationTps = Math.max(0, Math.round(totalGen * 100) / 100);
+          this.prefillTps = Math.max(0, Math.round(totalPrefill * 100) / 100);
+        }
+      }
+    } catch {}
+
+    if (!slotsOk) {
+      throw new Error("llama.cpp /slots unreachable");
+    }
+
+    // Props (model info)
+    try {
+      const propsRes = await this._fetch(`${this.baseUrl}/props`);
+      if (propsRes.ok) {
+        const props = await propsRes.json();
+        this.modelId = props.model_alias || props.model_path || this.modelId;
+        this.modelPath = props.model_path || null;
+        this.contextLength = props.total_context_length || props.context_length || this.contextLength;
+      }
+    } catch {}
+
+    this.backendType = "llama.cpp";
+    return this._getSnapshot();
+  }
+
+  // ─── Metrics helpers ─────────────────────────────────────
+  _getVllmMetric(body, name) {
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Allow optional Prometheus labels; sum all series (multi-engine / multi-model)
+    const re = new RegExp(`^vllm:${esc}(?:\\{[^}]*\\})?\\s+([\\d.eE+-]+)\\s*$`, "gm");
+    let sum = 0;
+    let found = false;
+    let m;
+    while ((m = re.exec(body)) !== null) {
+      const v = parseFloat(m[1]);
+      if (Number.isFinite(v)) {
+        sum += v;
+        found = true;
+      }
+    }
+    return found ? sum : null;
+  }
+
+  _getSlotDecoded(slot) {
+    // Some llama.cpp builds nest n_decoded inside next_token[0]
+    if (slot.n_decoded != null) {
+      if (Array.isArray(slot.n_decoded)) return slot.n_decoded[0] || 0;
+      return slot.n_decoded || 0;
+    }
+    // Fallback: next_token[0].n_decoded (newer llama.cpp)
+    if (Array.isArray(slot.next_token) && slot.next_token[0]?.n_decoded != null) {
+      return slot.next_token[0].n_decoded;
+    }
+    return 0;
+  }
+
+  _getSlotPrefilled(slot) {
+    return slot.n_prompt_tokens_processed || slot.n_prompt_tokens || 0;
+  }
+
+  _getSnapshot() {
+    return {
+      available: this.serverIsOpenAI !== null,
+      backend: this.backendType,
+      modelId: this.modelId || null,
+      modelPath: this.modelPath || null,
+      contextLength: this.contextLength,
+      gpuMemoryUtilization: this.gpuMemoryUtilization,
+      slotsActive: this.slotsActive,
+      slotsTotal: this.slotsTotal,
+      generationTps: this.generationTps,
+      prefillTps: this.prefillTps,
+      error: this.error,
+    };
+  }
+
+  _defaultLlm() {
+    return {
+      available: false,
+      backend: null,
+      modelId: null,
+      modelPath: null,
+      contextLength: null,
+      gpuMemoryUtilization: null,
+      slotsActive: 0,
+      slotsTotal: 0,
+      generationTps: 0,
+      prefillTps: 0,
+      error: this.error,
+    };
+  }
+
+  // ─── HTTP helpers ────────────────────────────────────────
+  async _fetch(url) {
+    return fetch(url, { signal: AbortSignal.timeout(LLM_PROBE_TIMEOUT_MS) });
+  }
+}

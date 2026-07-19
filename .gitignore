@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+sparks.json
+config/sparks-secrets.json
+config/.secrets-key
+*.log
+.DS_Store

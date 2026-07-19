@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option A — Warm Industrial</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root, [data-theme="dark"] {
+    --color-base: #0e0d0b;
+    --color-surface: #171614;
+    --color-surface-elevated: #1e1d1a;
+    --color-surface-hover: #262420;
+    --color-border: #2a2825;
+    --color-border-strong: #3a3732;
+    --color-text: #e8e4de;
+    --color-text-strong: #fff;
+    --color-muted: #8a8578;
+    --color-muted-strong: #b0a99c;
+    --color-accent: #d4934a;
+    --color-accent-hover: #e0a45e;
+    --color-accent-soft: rgba(212, 147, 74, 0.14);
+    --color-danger: #d94f4f;
+    --color-warning: #d4934a;
+    --color-success: #5aad5a;
+    --color-grid: rgba(255, 255, 255, 0.04);
+    --shadow-card: 0 1px 2px rgba(0,0,0,0.4), 0 0 0 1px var(--color-border);
+  }
+
+  [data-theme="light"] {
+    --color-base: #f5f3ef;
+    --color-surface: #ffffff;
+    --color-surface-elevated: #efecea;
+    --color-surface-hover: #e5e1db;
+    --color-border: #ddd9d3;
+    --color-border-strong: #c8c3ba;
+    --color-text: #1c1a17;
+    --color-text-strong: #000;
+    --color-muted: #6a6560;
+    --color-muted-strong: #454240;
+    --color-accent: #b87a30;
+    --color-accent-hover: #a06a28;
+    --color-accent-soft: rgba(184, 122, 48, 0.12);
+    --color-danger: #c03535;
+    --color-warning: #a06a28;
+    --color-success: #3d8c3d;
+    --color-grid: rgba(0, 0, 0, 0.04);
+    --shadow-card: 0 1px 2px rgba(0,0,0,0.05), 0 0 0 1px var(--color-border);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--color-base);
+    color: var(--color-text);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Theme toggle */
+  .theme-toggle {
+    position: fixed; top: 12px; right: 16px; z-index: 100;
+    display: flex; gap: 4px;
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 8px; padding: 3px;
+  }
+  .theme-toggle button {
+    padding: 4px 10px; border: none; border-radius: 6px; cursor: pointer;
+    font-size: 11px; font-weight: 500; letter-spacing: 0.02em;
+    background: transparent; color: var(--color-muted); transition: all 0.15s;
+  }
+  .theme-toggle button.active {
+    background: var(--color-accent-soft); color: var(--color-accent);
+  }
+
+  /* Option badge */
+  .option-badge {
+    position: fixed; top: 12px; left: 16px; z-index: 100;
+    padding: 5px 12px; border-radius: 8px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--color-accent); color: var(--color-base);
+  }
+
+  /* Header */
+  .header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px; border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+  }
+  .header h1 {
+    font-size: 14px; font-weight: 700; letter-spacing: 0.02em;
+    color: var(--color-text-strong); margin-right: 12px;
+  }
+  .tab {
+    padding: 5px 14px; border-radius: 6px; font-size: 12px; font-weight: 500;
+    cursor: pointer; border: 1px solid transparent; transition: all 0.15s;
+    color: var(--color-muted);
+  }
+  .tab:hover { background: var(--color-surface-hover); color: var(--color-text); }
+  .tab.active {
+    background: var(--color-surface-elevated); border-color: var(--color-border);
+    color: var(--color-text-strong);
+  }
+  .tab-add {
+    padding: 5px 10px; border-radius: 6px; font-size: 14px;
+    cursor: pointer; border: 1px dashed var(--color-border);
+    background: transparent; color: var(--color-muted); transition: all 0.15s;
+  }
+  .tab-add:hover { border-color: var(--color-accent); color: var(--color-accent); }
+
+  .header-spacer { flex: 1; }
+  .header-status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--color-success); font-weight: 500;
+  }
+  .header-status .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--color-success);
+    box-shadow: 0 0 0 2px rgba(90, 173, 90, 0.3);
+  }
+
+  /* Main grid */
+  .main { padding: 16px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  /* Panel */
+  .panel {
+    position: relative;
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-card);
+    padding: 14px;
+  }
+  .panel::before {
+    content: ""; position: absolute; left: 0; top: 14px; bottom: 14px;
+    width: 2px; border-radius: 0 2px 2px 0;
+    background: var(--color-accent); opacity: 0.55;
+  }
+  .panel-title {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--color-muted-strong);
+    margin-bottom: 12px;
+  }
+  .panel-title svg { color: var(--color-accent); width: 14px; height: 14px; }
+
+  /* Metric row */
+  .metric-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 0;
+  }
+  .metric-label { font-size: 12px; color: var(--color-muted); }
+  .metric-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums;
+    color: var(--color-text-strong);
+  }
+  .metric-value.big {
+    font-size: 28px; font-weight: 700; letter-spacing: -0.02em;
+  }
+
+  /* Metric bar */
+  .metric-bar {
+    height: 6px; border-radius: 3px; background: var(--color-surface-elevated);
+    overflow: hidden; margin-top: 6px;
+  }
+  .metric-bar-fill {
+    height: 100%; border-radius: 3px;
+    background: var(--color-accent); transition: width 0.3s ease;
+  }
+  .metric-bar-fill.danger { background: var(--color-danger); }
+  .metric-bar-fill.success { background: var(--color-success); }
+  .metric-bar-fill.warning { background: var(--color-warning); }
+
+  /* Chip */
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 6px; font-size: 11px;
+    color: var(--color-muted-strong);
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--color-border);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Status pill */
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 10px; border-radius: 9999px; font-size: 11px;
+    font-weight: 500; border: 1px solid var(--color-border);
+    background: var(--color-surface-elevated);
+  }
+  .status-pill .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+  }
+  .status-pill.online .dot {
+    background: var(--color-success);
+    box-shadow: 0 0 0 2px rgba(90, 173, 90, 0.3);
+  }
+  .status-pill.offline .dot { background: var(--color-danger); }
+
+  /* Sparkline mockup */
+  .sparkline { display: inline-block; vertical-align: middle; }
+
+  /* Section divider */
+  .section-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--color-muted);
+    margin: 10px 0 6px; padding-top: 8px;
+    border-top: 1px solid var(--color-grid);
+  }
+
+  /* Flex helpers */
+  .flex { display: flex; }
+  .flex-col { flex-direction: column; }
+  .gap-2 { gap: 8px; }
+  .gap-1 { gap: 4px; }
+  .items-center { align-items: center; }
+  .justify-between { justify-content: space-between; }
+  .mt-2 { margin-top: 8px; }
+  .mt-3 { margin-top: 12px; }
+  .mb-1 { margin-bottom: 4px; }
+
+  /* Card variant */
+  .card-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+  .summary-card {
+    border-radius: 10px; border: 1px solid var(--color-border);
+    background: var(--color-surface); box-shadow: var(--shadow-card);
+    padding: 12px;
+  }
+  .summary-card .label { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-muted); }
+  .summary-card .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px; font-weight: 700; margin-top: 4px;
+    color: var(--color-text-strong); font-variant-numeric: tabular-nums;
+  }
+  .summary-card .sub { font-size: 11px; color: var(--color-muted); margin-top: 2px; }
+</style>
+</head>
+<body>
+  <div class="option-badge">Option A — Warm Industrial</div>
+
+  <div class="theme-toggle">
+    <button class="active" onclick="document.documentElement.dataset.theme='dark'; this.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active')); this.classList.add('active')">Dark</button>
+    <button onclick="document.documentElement.dataset.theme='light'; this.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active')); this.classList.add('active')">Light</button>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <h1>sparkDash</h1>
+    <div class="tab active">dgx-spark-01</div>
+    <div class="tab">dgx-spark-02</div>
+    <div class="tab">remote-node</div>
+    <button class="tab-add">+</button>
+    <div class="header-spacer"></div>
+    <div class="status-pill online"><span class="dot"></span> 3 online</div>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="main">
+    <div class="card-grid">
+      <div class="summary-card">
+        <div class="label">GPU Util</div>
+        <div class="value" style="color: var(--color-accent);">72%</div>
+        <div class="sub">NVIDIA GB10</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">GPU Temp</div>
+        <div class="value">61°</div>
+        <div class="sub">of 90° max</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">VRAM</div>
+        <div class="value">84<span style="font-size:14px;color:var(--color-muted)"> GB</span></div>
+        <div class="sub">of 128 GB HBM3e</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">LLM tok/s</div>
+        <div class="value" style="color: var(--color-success);">34.2</div>
+        <div class="sub">llama.cpp · Qwen3</div>
+      </div>
+    </div>
+
+    <!-- Panels -->
+    <div class="grid">
+      <!-- GPU Panel -->
+      <div class="panel">
+        <div class="panel-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="9" y1="20" x2="9" y2="14"/><line x1="15" y1="20" x2="15" y2="14"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
+          GPU
+        </div>
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="metric-value big">72<span style="font-size:16px;color:var(--color-muted)">%</span></div>
+            <div class="metric-label mt-1">GPU Utilization</div>
+          </div>
+          <div style="text-align:right">
+            <div class="metric-value">61°C</div>
+            <div class="metric-label mt-1">Temperature</div>
+          </div>
+        </div>
+        <div class="metric-bar mt-2"><div class="metric-bar-fill" style="width:72%"></div></div>
+
+        <div class="section-label">VRAM</div>
+        <div class="flex justify-between items-center">
+          <div class="metric-value">84.2 <span style="font-size:11px;color:var(--color-muted)">/ 128 GB</span></div>
+          <span class="chip">65.8%</span>
+        </div>
+        <div class="metric-bar mt-2"><div class="metric-bar-fill success" style="width:66%"></div></div>
+
+        <div class="section-label">Unified Memory</div>
+        <div class="flex justify-between items-center">
+          <div class="metric-value">96.4 <span style="font-size:11px;color:var(--color-muted)">/ 128 GB</span></div>
+          <span class="chip">75.3%</span>
+        </div>
+        <div class="metric-bar mt-2"><div class="metric-bar-fill warning" style="width:75%"></div></div>
+
+        <div class="section-label">Memory Bandwidth</div>
+        <div class="flex justify-between items-center">
+          <div class="metric-value">187 <span style="font-size:11px;color:var(--color-muted)">/ 400 GB/s</span></div>
+        </div>
+        <div class="metric-bar mt-2"><div class="metric-bar-fill" style="width:47%"></div></div>
+
+        <div class="section-label">Power</div>
+        <div class="flex justify-between items-center">
+          <div class="metric-value">142 <span style="font-size:11px;color:var(--color-muted)">/ 250 W</span></div>
+          <span class="chip">56.8%</span>
+        </div>
+        <div class="metric-bar mt-2"><div class="metric-bar-fill" style="width:57%"></div></div>
+      </div>
+
+      <!-- CPU Panel -->
+      <div class="panel">
+        <div class="panel-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8" y="8" width="8" height="8"/><line x1="8" y1="1" x2="8" y2="4"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="16" y1="1" x2="16" y2="4"/><line x1="8" y1="20" x2="8" y2="23"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="16" y1="20" x2="16" y2="23"/></svg>
+          CPU
+        </div>
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="metric-value big">38<span style="font-size:16px;color:var(--color-muted)">%</span></div>
+            <div class="metric-label mt-1">Neoverse V2 · 10 cores</div>
+          </div>
+          <div style="text-align:right">
+            <div class="metric-value">52°C</div>
+            <div class="metric-label mt-1">Temperature</div>
+          </div>
+        </div>
+        <div class="metric-bar mt-2"><div class="metric-bar-fill" style="width:38%"></div></div>
+
+        <div class="section-label">Per-core</div>
+        <div class="flex gap-2" style="flex-wrap:wrap; gap:4px;">
+          <span class="chip" style="width:32px;justify-content:center;">24</span>
+          <span class="chip" style="width:32px;justify-content:center;">41</span>
+          <span class="chip" style="width:32px;justify-content:center;">67</span>
+          <span class="chip" style="width:32px;justify-content:center;">33</span>
+          <span class="chip" style="width:32px;justify-content:center;">19</span>
+          <span class="chip" style="width:32px;justify-content:center;">55</span>
+          <span class="chip" style="width:32px;justify-content:center;">28</span>
+          <span class="chip" style="width:32px;justify-content:center;">44</span>
+          <span class="chip" style="width:32px;justify-content:center;">37</span>
+          <span class="chip" style="width:32px;justify-content:center;">51</span>
+        </div>
+
+        <div class="section-label">RAM</div>
+        <div class="flex justify-between items-center">
+          <div class="metric-value">96.4 <span style="font-size:11px;color:var(--color-muted)">/ 128 GB</span></div>
+          <span class="chip">75.3%</span>
+        </div>
+        <div class="metric-bar mt-2"><div class="metric-bar-fill warning" style="width:75%"></div></div>
+      </div>
+
+      <!-- Storage Panel -->
+      <div class="panel">
+        <div class="panel-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
+          Storage
+        </div>
+        <div class="flex flex-col gap-2">
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <span class="metric-label">/ (rootfs)</span>
+              <span class="metric-value">214 <span style="font-size:11px;color:var(--color-muted)">/ 931 GB</span></span>
+            </div>
+            <div class="metric-bar"><div class="metric-bar-fill success" style="width:23%"></div></div>
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <span class="metric-label">/home</span>
+              <span class="metric-value">487 <span style="font-size:11px;color:var(--color-muted)">/ 931 GB</span></span>
+            </div>
+            <div class="metric-bar"><div class="metric-bar-fill warning" style="width:52%"></div></div>
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <span class="metric-label">/data</span>
+              <span class="metric-value">812 <span style="font-size:11px;color:var(--color-muted)">/ 2000 GB</span></span>
+            </div>
+            <div class="metric-bar"><div class="metric-bar-fill danger" style="width:41%"></div></div>
+          </div>
+        </div>
+        <div class="section-label">I/O</div>
+        <div class="flex justify-between">
+          <div>
+            <div class="metric-label">Read</div>
+            <div class="metric-value">128 <span style="font-size:11px;color:var(--color-muted)">MB/s</span></div>
+          </div>
+          <div style="text-align:right">
+            <div class="metric-label">Write</div>
+            <div class="metric-value">64 <span style="font-size:11px;color:var(--color-muted)">MB/s</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Network Panel -->
+      <div class="panel">
+        <div class="panel-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+          Network
+        </div>
+        <div class="flex flex-col gap-2">
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <span class="metric-label">eth0</span>
+              <div class="flex gap-1">
+                <span class="chip" style="color:var(--color-success)">▲ 24.3 MB/s</span>
+                <span class="chip" style="color:var(--color-accent)">▼ 112.8 MB/s</span>
+              </div>
+            </div>
+            <div class="metric-bar"><div class="metric-bar-fill success" style="width:12%"></div></div>
+          </div>
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <span class="metric-label">lo</span>
+              <div class="flex gap-1">
+                <span class="chip">▲ 0.4 MB/s</span>
+                <span class="chip">▼ 0.4 MB/s</span>
+              </div>
+            </div>
+            <div class="metric-bar"><div class="metric-bar-fill" style="width:1%"></div></div>
+          </div>
+        </div>
+        <div class="section-label">Interfaces</div>
+        <div class="flex gap-2">
+          <span class="chip">eth0 <span style="color:var(--color-success)">●</span></span>
+          <span class="chip">lo <span style="color:var(--color-success)">●</span></span>
+        </div>
+      </div>
+
+      <!-- LLM Panel -->
+      <div class="panel" style="grid-column: span 2;">
+        <div class="panel-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20z"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          LLM Server
+        </div>
+        <div class="flex justify-between items-center">
+          <div>
+            <div class="flex gap-2 items-center">
+              <span class="status-pill online"><span class="dot"></span> llama.cpp</span>
+              <span class="chip">Qwen3-32B-Q4_K_M</span>
+              <span class="chip">port 8888</span>
+            </div>
+          </div>
+        </div>
+        <div class="grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-top: 12px;">
+          <div>
+            <div class="metric-label mb-1">Prompt tok/s</div>
+            <div class="metric-value big" style="color:var(--color-accent)">34.2</div>
+            <div class="metric-bar mt-2"><div class="metric-bar-fill" style="width:34%"></div></div>
+          </div>
+          <div>
+            <div class="metric-label mb-1">Generation tok/s</div>
+            <div class="metric-value big" style="color:var(--color-success)">28.7</div>
+            <div class="metric-bar mt-2"><div class="metric-bar-fill success" style="width:29%"></div></div>
+          </div>
+          <div>
+            <div class="metric-label mb-1">Slots</div>
+            <div class="metric-value big">4<span style="font-size:14px;color:var(--color-muted)"> / 4</span></div>
+            <div class="metric-bar mt-2"><div class="metric-bar-fill warning" style="width:100%"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

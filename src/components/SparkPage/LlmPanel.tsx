@@ -1,0 +1,330 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import type { LlmMetrics } from "../../api/types";
+import { updateLlmPort, runLlmBench } from "../../api/client";
+import { Sparkline } from "../ui/Sparkline";
+import { Panel } from "../ui/Panel";
+import { BotIcon, GearIcon } from "../ui/icons";
+
+interface LlmPanelProps {
+  llm: LlmMetrics | null;
+  sparkId: string;
+  llmPort: number;
+  onLlmPortChange: (port: number) => void;
+  className?: string;
+}
+
+
+/** Backend badge — neutral surfaces with a single accent dot. No blue/purple. */
+function BackendBadge({ backend }: { backend: string | null }) {
+  if (!backend) return <span className="text-xs text-muted">No backend</span>;
+
+  const labels: Record<string, string> = {
+    vllm: "vLLM",
+    "llama.cpp": "llama.cpp",
+    sglang: "sgLang",
+  };
+
+  return (
+    <span className="llm-badge">
+      <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+      {labels[backend] || backend}
+    </span>
+  );
+}
+
+export function LlmPanel({ llm, sparkId, llmPort, onLlmPortChange, className }: LlmPanelProps) {
+  const [genHistory, setGenHistory] = useState<number[]>([]);
+  const [benchmarking, setBenchmarking] = useState(false);
+  const [benchResult, setBenchResult] = useState<{ generationTps: number; totalMs: number; promptTokens: number; completionTokens: number } | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [portDraft, setPortDraft] = useState(String(llmPort));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [engineInfoOpen, setEngineInfoOpen] = useState(false);
+  const engineInfoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearEngineInfoTimer = useCallback(() => {
+    if (engineInfoTimer.current != null) {
+      clearTimeout(engineInfoTimer.current);
+      engineInfoTimer.current = null;
+    }
+  }, []);
+
+  const startEngineInfoTimer = useCallback(() => {
+    clearEngineInfoTimer();
+    engineInfoTimer.current = setTimeout(() => setEngineInfoOpen(false), 2000);
+  }, [clearEngineInfoTimer]);
+
+  const generationTps = llm?.generationTps ?? 0;
+  const available = llm?.available ?? false;
+
+  // Keep draft in sync when server pushes a different port (other tab / reload)
+  useEffect(() => {
+    if (!showSettings) setPortDraft(String(llmPort));
+  }, [llmPort, showSettings]);
+
+  // Track token rates over time for sparklines
+  useEffect(() => {
+    setGenHistory((prev) => [...prev.slice(-30), generationTps]);
+  }, [generationTps]);
+
+  const handleBenchmark = async () => {
+    setBenchmarking(true);
+    setBenchResult(null);
+    try {
+      const result = await runLlmBench(sparkId);
+      if (result.ok && result.generationTps != null) {
+        setBenchResult({
+          generationTps: result.generationTps,
+          totalMs: result.totalMs ?? 0,
+          promptTokens: result.promptTokens ?? 0,
+          completionTokens: result.completionTokens ?? 0,
+        });
+      }
+    } catch (err) {
+      console.error("Benchmark failed:", err);
+    } finally {
+      setBenchmarking(false);
+    }
+  };
+
+  const parsedPort = (() => {
+    const n = parseInt(portDraft, 10);
+    if (!Number.isInteger(n) || n < 1 || n > 65535) return null;
+    return n;
+  })();
+
+  const portDirty = parsedPort !== null && parsedPort !== llmPort;
+  const portInvalid = portDraft.trim() !== "" && parsedPort === null;
+
+  const handleSavePort = async () => {
+    if (parsedPort === null) {
+      setSaveError("Port must be an integer 1–65535");
+      return;
+    }
+    if (parsedPort === llmPort) {
+      setShowSettings(false);
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await updateLlmPort(sparkId, parsedPort);
+      onLlmPortChange(parsedPort);
+      setShowSettings(false);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save port");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Panel
+      title="LLM"
+      accent={available}
+      icon={<BotIcon />}
+      className={`panel-llm ${className}`}
+      actions={
+        <div className="flex items-center gap-1.5">
+          {false && available && !showSettings && (
+            <button
+              type="button"
+              onClick={handleBenchmark}
+              disabled={benchmarking}
+              className="rounded border border-border px-2 py-0.5 text-[10px] text-muted hover:bg-surface-hover disabled:opacity-50"
+            >
+              {benchmarking ? "Running…" : "Run benchmark"}
+            </button>
+          )}
+          <button
+            type="button"
+            title={showSettings ? "Done" : "LLM settings"}
+            onClick={() => {
+              if (showSettings) {
+                setPortDraft(String(llmPort));
+                setSaveError(null);
+              }
+              setShowSettings(!showSettings);
+            }}
+            disabled={saving}
+            className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted transition-colors hover:bg-surface-hover disabled:opacity-50 ${
+              showSettings ? "bg-surface-elevated text-text" : ""
+            }`}
+          >
+            <GearIcon />
+            <span>{showSettings ? "Done" : "Settings"}</span>
+          </button>
+        </div>
+      }
+    >
+      {showSettings ? (
+        <div className="space-y-3">
+          <p className="text-[10px] text-muted">
+            HTTP port of the LLM server on this Spark (vLLM / llama.cpp / sglang).
+          </p>
+          <label className="block space-y-1">
+            <span className="text-xs text-muted">Port</span>
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              inputMode="numeric"
+              value={portDraft}
+              onChange={(e) => {
+                setPortDraft(e.target.value);
+                setSaveError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleSavePort();
+                }
+              }}
+              className="w-full rounded-md border border-border bg-surface-elevated px-3 py-1.5 font-tabular text-sm text-text outline-none focus:border-accent"
+            />
+          </label>
+          {portInvalid && (
+            <p className="text-[10px] text-danger">Enter an integer between 1 and 65535</p>
+          )}
+          {saveError && <p className="text-[10px] text-danger">{saveError}</p>}
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setPortDraft(String(llmPort));
+                setSaveError(null);
+                setShowSettings(false);
+              }}
+              disabled={saving}
+              className="rounded border border-border px-2 py-1 text-[10px] text-muted hover:bg-surface-hover disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSavePort()}
+              disabled={saving || portInvalid || (!portDirty && parsedPort === llmPort)}
+              className="rounded bg-accent px-2 py-1 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      ) : !available ? (
+        <div className="flex items-center gap-2 py-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-muted" />
+          <p className="text-xs text-muted">No model loaded on :{llmPort}</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <BackendBadge backend={llm?.backend ?? null} />
+            {llm?.modelId && (
+              <span
+                className="max-w-[200px] truncate text-xs text-text"
+                title={llm.modelId}
+              >
+                {llm.modelId}
+              </span>
+            )}
+            <span className="ml-auto shrink-0 font-tabular text-[10px] text-muted">:{llmPort}</span>
+          </div>
+          {llm?.modelPath && (
+            <div className="-mt-1.5 truncate text-[10px] text-muted" title={llm.modelPath}>
+              {llm.modelPath}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted">Generation tok/s</span>
+            <div className="flex items-center gap-2">
+              <Sparkline data={genHistory} color="var(--color-accent)" height={24} />
+              <span className="font-tabular text-sm font-semibold text-accent">
+                {generationTps.toFixed(1)}
+              </span>
+            </div>
+          </div>
+
+          {benchResult && (
+            <div className="flex items-center justify-between rounded-md border border-accent/30 bg-accent-soft px-3 py-1.5 text-xs">
+              <span className="text-muted">Benchmark</span>
+              <span className="font-tabular text-accent">
+                {benchResult.generationTps.toFixed(1)} tok/s
+                <span className="text-muted"> · {benchResult.completionTokens} tok · {benchResult.totalMs}ms</span>
+              </span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-2 border-t border-border pt-3">
+            <div className="space-y-0.5">
+              <div className="text-[10px] uppercase tracking-wide text-muted">Slots</div>
+              <div className="font-tabular text-sm text-text">
+                {(llm?.slotsTotal ?? 0) > 0
+                  ? `${llm?.slotsActive ?? 0} / ${llm?.slotsTotal ?? 0}`
+                  : (llm?.slotsActive ?? 0) > 0
+                    ? `${llm?.slotsActive} running`
+                    : "—"}
+              </div>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-[10px] uppercase tracking-wide text-muted">Context</div>
+              <div className="font-tabular text-sm text-text">
+                {llm?.contextLength ? llm.contextLength.toLocaleString() : "—"}
+              </div>
+            </div>
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted">
+                <span>Engine</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEngineInfoOpen((v) => {
+                      if (!v) startEngineInfoTimer();
+                      return !v;
+                    });
+                  }}
+                  onMouseEnter={clearEngineInfoTimer}
+                  onMouseLeave={startEngineInfoTimer}
+                  className="relative cursor-pointer opacity-60 hover:opacity-100"
+                  aria-label="Engine state info"
+                >
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 16v-4" />
+                    <path d="M12 8h.01" />
+                  </svg>
+                  {engineInfoOpen && (
+                    <div
+                      onMouseEnter={clearEngineInfoTimer}
+                      onMouseLeave={startEngineInfoTimer}
+                      className="absolute left-0 top-full z-10 mt-1 w-56 rounded-md border border-border bg-surface-elevated px-3 py-2 text-left text-[11px] font-normal normal-case text-text shadow-lg"
+                    >
+                      Active = processing or ready for requests. Sleeping = idle, GPU memory freed until next request.
+                    </div>
+                  )}
+                </button>
+              </div>
+              <div className="font-tabular text-sm text-text">
+                {llm?.gpuMemoryUtilization != null
+                  ? llm.gpuMemoryUtilization === 0
+                    ? "Sleeping"
+                    : "Active"
+                  : "—"}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}

@@ -1,0 +1,1534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>sparkDash — DGX Spark Monitor</title>
+    <style>
+        /* ─── Reset ──────────────────────────────────────── */
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        /* ─── Design tokens ──────────────────────────────── */
+        :root {
+            --bg: #f2f5f3;
+            --bg-gradient: linear-gradient(160deg, #eaf3ed 0%, #f2f5f3 40%, #eef3f0 100%);
+            --surface: #ffffff;
+            --surface-hover: #f8faf9;
+            --border: #e8ede9;
+            --border-strong: #d4dbd6;
+            --text: #1a2e1f;
+            --text-strong: #0a1a0e;
+            --muted: #6b7c6e;
+            --muted-strong: #4a5c4d;
+            --accent: #2d9d78;
+            --accent-light: #e6f5ef;
+            --accent-hover: #258a68;
+            --accent-soft: rgba(45, 157, 120, 0.10);
+            --danger: #dc4444;
+            --danger-light: #fde8e8;
+            --warning: #d97706;
+            --warning-light: #fef3cd;
+            --success: #16a34a;
+            --success-light: #dcfce7;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.04), 0 0 0 1px var(--border);
+            --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 0 0 1px var(--border);
+            --shadow-lg: 0 8px 24px rgba(0,0,0,0.08), 0 0 0 1px var(--border);
+            --radius: 16px;
+            --radius-sm: 10px;
+            --sidebar-w: 240px;
+        }
+
+        /* ─── Base ───────────────────────────────────────── */
+        body {
+            font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+            background: var(--bg-gradient);
+            min-height: 100vh;
+            color: var(--text);
+            font-size: 13px;
+            display: flex;
+        }
+
+        /* ─── Sidebar ────────────────────────────────────── */
+        .sidebar {
+            width: var(--sidebar-w);
+            min-height: 100vh;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 50;
+        }
+
+        .sidebar-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 24px 24px 32px;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-strong);
+        }
+
+        .sidebar-logo .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: var(--accent);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 16px;
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 0 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .sidebar-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--muted);
+            cursor: pointer;
+            transition: all 0.15s;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+        }
+
+        .sidebar-item:hover {
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+
+        .sidebar-item.active {
+            background: var(--accent-light);
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .sidebar-item svg {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
+        .sidebar-item .badge {
+            margin-left: auto;
+            padding: 2px 8px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 600;
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .sidebar-bottom {
+            padding: 16px;
+            margin: 12px;
+            background: var(--accent-light);
+            border-radius: var(--radius);
+            text-align: center;
+        }
+
+        .sidebar-bottom h4 {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-strong);
+            margin-bottom: 4px;
+        }
+
+        .sidebar-bottom p {
+            font-size: 11px;
+            color: var(--muted);
+            margin-bottom: 10px;
+            line-height: 1.4;
+        }
+
+        .sidebar-bottom .cta-btn {
+            display: inline-block;
+            padding: 8px 20px;
+            background: var(--accent);
+            color: #fff;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: background 0.15s;
+        }
+
+        .sidebar-bottom .cta-btn:hover {
+            background: var(--accent-hover);
+        }
+
+        /* ─── Main content ───────────────────────────────── */
+        .main {
+            margin-left: var(--sidebar-w);
+            flex: 1;
+            padding: 28px 32px;
+            min-height: 100vh;
+        }
+
+        /* ─── Header bar ─────────────────────────────────── */
+        .header-bar {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+
+        .greeting h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-strong);
+        }
+
+        .greeting p {
+            font-size: 13px;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+
+        .header-search {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 8px 16px;
+            width: 280px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .header-search svg {
+            width: 16px;
+            height: 16px;
+            color: var(--muted);
+        }
+
+        .header-search input {
+            border: none;
+            outline: none;
+            background: none;
+            font-size: 13px;
+            color: var(--text);
+            width: 100%;
+        }
+
+        .header-search input::placeholder {
+            color: var(--muted);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .header-actions .icon-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: var(--muted);
+            font-size: 16px;
+            transition: all 0.15s;
+        }
+
+        .header-actions .icon-btn:hover {
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+
+        .header-actions .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        /* ─── Stat cards ─────────────────────────────────── */
+        .stat-cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 80px;
+            height: 80px;
+            border-radius: 0 0 0 80px;
+            opacity: 0.06;
+        }
+
+        .stat-card.green::after { background: var(--accent); }
+        .stat-card.blue::after { background: #3b82f6; }
+        .stat-card.amber::after { background: var(--warning); }
+        .stat-card.red::after { background: var(--danger); }
+
+        .stat-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .stat-card-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--muted);
+        }
+
+        .stat-card-dots {
+            color: var(--muted);
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        .stat-card-value {
+            font-size: 32px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            line-height: 1;
+            margin-bottom: 4px;
+        }
+
+        .stat-card-value.green { color: var(--accent); }
+        .stat-card-value.blue { color: #3b82f6; }
+        .stat-card-value.amber { color: var(--warning); }
+        .stat-card-value.red { color: var(--danger); }
+
+        .stat-card-sub {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .stat-card-sub .tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 8px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .tag.up { background: var(--success-light); color: var(--success); }
+        .tag.down { background: var(--danger-light); color: var(--danger); }
+
+        .stat-card .mini-chart {
+            display: flex;
+            align-items: flex-end;
+            gap: 3px;
+            height: 32px;
+            margin-top: 12px;
+        }
+
+        .stat-card .mini-chart .bar {
+            flex: 1;
+            border-radius: 3px;
+            background: var(--border);
+        }
+
+        .stat-card .mini-chart .bar.filled { background: var(--accent); }
+
+        .stat-card .donut {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: 5px solid var(--border);
+            border-top-color: var(--accent);
+            border-right-color: var(--accent);
+            margin-top: 8px;
+        }
+
+        /* ─── Content grid ───────────────────────────────── */
+        .content-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .content-grid.equal {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .content-grid.thirds {
+            grid-template-columns: 1fr 1fr 1fr;
+        }
+
+        /* ─── Card ───────────────────────────────────────── */
+        .card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 22px;
+            box-shadow: var(--shadow);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 18px;
+        }
+
+        .card-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-strong);
+        }
+
+        .card-subtitle {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+
+        .card-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--muted);
+            cursor: pointer;
+        }
+
+        /* ─── Overview chart card ────────────────────────── */
+        .chart-header-stats {
+            display: flex;
+            gap: 28px;
+            margin-bottom: 16px;
+        }
+
+        .chart-stat {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chart-stat-label {
+            font-size: 11px;
+            color: var(--muted);
+            margin-bottom: 4px;
+        }
+
+        .chart-stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .chart-stat-value.green { color: var(--accent); }
+
+        /* ─── Bar chart ──────────────────────────────────── */
+        .bar-chart {
+            display: flex;
+            align-items: flex-end;
+            gap: 6px;
+            height: 140px;
+            padding-top: 20px;
+        }
+
+        .bar-chart .col {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            height: 100%;
+            justify-content: flex-end;
+        }
+
+        .bar-chart .col .bars {
+            display: flex;
+            gap: 3px;
+            align-items: flex-end;
+            width: 100%;
+        }
+
+        .bar-chart .col .bar {
+            flex: 1;
+            border-radius: 4px 4px 0 0;
+            min-height: 4px;
+        }
+
+        .bar-chart .col .bar.green { background: var(--accent); }
+        .bar-chart .col .bar.light { background: #c6e8d8; }
+        .bar-chart .col .bar.dark { background: #1a2e1f; }
+        .bar-chart .col .bar.gray { background: var(--border); }
+
+        .bar-chart .label {
+            font-size: 10px;
+            color: var(--muted);
+            text-align: center;
+        }
+
+        /* ─── Spark detail: metric row ───────────────────── */
+        .metric-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+        }
+
+        .metric-row + .metric-row {
+            border-top: 1px solid var(--border);
+        }
+
+        .metric-row .label {
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        .metric-row .value {
+            font-size: 14px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .metric-bar {
+            height: 6px;
+            background: var(--border);
+            border-radius: 99px;
+            overflow: hidden;
+            margin-top: 6px;
+        }
+
+        .metric-bar-fill {
+            height: 100%;
+            border-radius: 99px;
+            transition: width 0.4s ease;
+        }
+
+        .bar-green { background: var(--accent); }
+        .bar-light-green { background: #c6e8d8; }
+        .bar-dark { background: var(--text-strong); }
+        .bar-warning { background: var(--warning); }
+        .bar-danger { background: var(--danger); }
+
+        /* ─── Gauge / satisfaction ring ───────────────────── */
+        .gauge {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .gauge-ring {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: conic-gradient(var(--accent) 0% 73%, var(--border) 73% 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .gauge-ring::before {
+            content: '';
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            background: var(--surface);
+            position: absolute;
+        }
+
+        .gauge-ring .gauge-value {
+            position: relative;
+            z-index: 1;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .gauge-label {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 8px;
+        }
+
+        .gauge-legend {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .gauge-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .gauge-legend-item .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .gauge-legend-item .count {
+            margin-left: auto;
+            font-weight: 600;
+        }
+
+        /* ─── Table ──────────────────────────────────────── */
+        .table-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .table-search {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 12px;
+            flex: 1;
+        }
+
+        .table-search svg {
+            width: 14px;
+            height: 14px;
+            color: var(--muted);
+        }
+
+        .table-search input {
+            border: none;
+            outline: none;
+            background: none;
+            font-size: 12px;
+            color: var(--text);
+            width: 100%;
+        }
+
+        .table-search input::placeholder { color: var(--muted); }
+
+        .filter-btn {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 6px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 12px;
+            color: var(--muted);
+            background: var(--surface);
+            cursor: pointer;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--muted);
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        td {
+            padding: 12px;
+            font-size: 13px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: middle;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .table-avatar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .table-avatar .img {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: var(--accent-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .table-avatar .info .name {
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .table-avatar .info .id {
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .table-role .title {
+            font-weight: 500;
+        }
+
+        .table-role .dept {
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .table-mono {
+            font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .download-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--accent);
+            background: var(--surface);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .download-btn:hover {
+            background: var(--accent-light);
+            border-color: var(--accent);
+        }
+
+        .pagination {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 16px;
+            justify-content: flex-end;
+        }
+
+        .pagination .page-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--muted);
+            cursor: pointer;
+        }
+
+        .pagination .page-btn.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        .pagination .page-btn:hover:not(.active) {
+            background: var(--surface-hover);
+        }
+
+        .pagination .show-info {
+            font-size: 12px;
+            color: var(--muted);
+            margin-right: auto;
+        }
+
+        /* ─── Spark page overrides ───────────────────────── */
+        .spark-page { display: none; }
+        .spark-page.visible { display: block; }
+
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--muted);
+            cursor: pointer;
+            margin-bottom: 16px;
+            transition: all 0.15s;
+        }
+
+        .back-btn:hover { background: var(--surface-hover); color: var(--text); }
+
+        /* ─── LLM panel ──────────────────────────────────── */
+        .llm-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            background: var(--accent-light);
+            color: var(--accent);
+        }
+
+        .toks-big {
+            text-align: center;
+            padding: 16px 0;
+        }
+
+        .toks-big .num {
+            font-size: 40px;
+            font-weight: 700;
+            color: var(--accent);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .toks-big .unit {
+            font-size: 16px;
+            color: var(--muted);
+            font-weight: 400;
+        }
+
+        /* ─── Scrollbar ──────────────────────────────────── */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+
+        /* ─── Responsive ─────────────────────────────────── */
+        @media (max-width: 1200px) {
+            .stat-cards { grid-template-columns: repeat(2, 1fr); }
+            .content-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 768px) {
+            .sidebar { display: none; }
+            .main { margin-left: 0; padding: 16px; }
+            .stat-cards { grid-template-columns: 1fr; }
+            .header-bar { flex-wrap: wrap; }
+        }
+    </style>
+</head>
+<body>
+    <!-- ─── Sidebar ─────────────────────────────────────── -->
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <div class="logo-icon">⚡</div>
+            spark<span style="font-weight:400;color:var(--muted)">Dash</span>
+        </div>
+        <nav class="sidebar-nav">
+            <button class="sidebar-item active" onclick="showPage('overview')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                Dashboard
+            </button>
+            <button class="sidebar-item" onclick="showPage('spark-1')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                Spark Alpha
+                <span class="badge">●</span>
+            </button>
+            <button class="sidebar-item" onclick="showPage('spark-2')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                Spark Beta
+                <span class="badge">●</span>
+            </button>
+            <button class="sidebar-item" onclick="showPage('spark-3')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                Spark Gamma
+            </button>
+            <div style="height:1px;background:var(--border);margin:8px 14px"></div>
+            <button class="sidebar-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24"/></svg>
+                Settings
+            </button>
+        </nav>
+        <div class="sidebar-bottom">
+            <h4>⚡ Upgrade your Plan</h4>
+            <p>Get full control with advanced features and automation</p>
+            <a href="#" class="cta-btn">Get sparkDash Pro</a>
+        </div>
+    </aside>
+
+    <!-- ─── Main Content ────────────────────────────────── -->
+    <div class="main">
+        <!-- ═══ OVERVIEW PAGE ═══════════════════════════════ -->
+        <div id="page-overview">
+            <div class="header-bar">
+                <div class="greeting">
+                    <p>Good Evening,</p>
+                    <h1>sparkDash Admin <span style="font-size:14px;font-weight:400;color:var(--muted)">· DGX Fleet Monitor</span></h1>
+                </div>
+                <div class="header-search">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                    <input type="text" placeholder="Search anything">
+                </div>
+                <div class="header-actions">
+                    <button class="icon-btn" title="Settings">⚙</button>
+                    <button class="icon-btn" title="Notifications">🔔</button>
+                    <div class="avatar">A</div>
+                </div>
+            </div>
+
+            <!-- Stat Cards -->
+            <div class="stat-cards">
+                <div class="stat-card green">
+                    <div class="stat-card-header">
+                        <span class="stat-card-title">Total Sparks</span>
+                        <span class="stat-card-dots">⋯</span>
+                    </div>
+                    <div class="stat-card-value green">3</div>
+                    <div class="stat-card-sub">
+                        <span class="tag up">↑ 2 online</span>
+                        1 offline
+                    </div>
+                </div>
+                <div class="stat-card green">
+                    <div class="stat-card-header">
+                        <span class="stat-card-title">GPU Usage (avg)</span>
+                        <span class="stat-card-dots">⋯</span>
+                    </div>
+                    <div class="stat-card-value green">48%</div>
+                    <div class="stat-card-sub">
+                        <span class="tag up">↑ 12%</span>
+                        vs last week
+                    </div>
+                </div>
+                <div class="stat-card amber">
+                    <div class="stat-card-header">
+                        <span class="stat-card-title">LLM Throughput</span>
+                        <span class="stat-card-dots">⋯</span>
+                    </div>
+                    <div class="stat-card-value amber">85</div>
+                    <div class="stat-card-sub">
+                        tok/s combined
+                    </div>
+                </div>
+                <div class="stat-card red">
+                    <div class="stat-card-header">
+                        <span class="stat-card-title">Avg Temperature</span>
+                        <span class="stat-card-dots">⋯</span>
+                    </div>
+                    <div class="stat-card-value" style="color:var(--text-strong)">55°C</div>
+                    <div class="stat-card-sub">
+                        <span class="tag up">↓ 3°C</span>
+                        vs last week
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="content-grid">
+                <!-- GPU Usage Chart -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">GPU Usage Report</div>
+                            <div class="card-subtitle">Per-Spark GPU utilization</div>
+                        </div>
+                        <div class="card-badge">October ▾</div>
+                    </div>
+                    <div class="chart-header-stats">
+                        <div class="chart-stat">
+                            <span class="chart-stat-label">Alpha</span>
+                            <span class="chart-stat-value green">84%</span>
+                        </div>
+                        <div class="chart-stat">
+                            <span class="chart-stat-label">Beta</span>
+                            <span class="chart-stat-value" style="color:var(--text-strong)">12%</span>
+                        </div>
+                        <div class="chart-stat">
+                            <span class="chart-stat-label">Gamma</span>
+                            <span class="chart-stat-value" style="color:var(--danger)">offline</span>
+                        </div>
+                    </div>
+                    <div class="bar-chart">
+                        <div class="col"><div class="bars"><div class="bar green" style="height:60%"></div><div class="bar light" style="height:40%"></div><div class="bar gray" style="height:0%"></div></div><div class="label">Mon</div></div>
+                        <div class="col"><div class="bars"><div class="bar green" style="height:75%"></div><div class="bar light" style="height:35%"></div><div class="bar gray" style="height:0%"></div></div><div class="label">Tue</div></div>
+                        <div class="col"><div class="bars"><div class="bar green" style="height:80%"></div><div class="bar light" style="height:30%"></div><div class="bar gray" style="height:0%"></div></div><div class="label">Wed</div></div>
+                        <div class="col"><div class="bars"><div class="bar green" style="height:70%"></div><div class="bar light" style="height:25%"></div><div class="bar gray" style="height:0%"></div></div><div class="label">Thu</div></div>
+                        <div class="col"><div class="bars"><div class="bar green" style="height:85%"></div><div class="bar light" style="height:20%"></div><div class="bar gray" style="height:0%"></div></div><div class="label">Fri</div></div>
+                        <div class="col"><div class="bars"><div class="bar green" style="height:65%"></div><div class="bar light" style="height:15%"></div><div class="bar gray" style="height:0%"></div></div><div class="label">Sat</div></div>
+                        <div class="col"><div class="bars"><div class="bar green" style="height:50%"></div><div class="bar light" style="height:10%"></div><div class="bar gray" style="height:0%"></div></div><div class="label">Sun</div></div>
+                    </div>
+                    <div style="display:flex;gap:16px;margin-top:12px;font-size:11px;color:var(--muted)">
+                        <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--accent)"></span> Alpha</span>
+                        <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:#c6e8d8"></span> Beta</span>
+                        <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--border)"></span> Gamma</span>
+                    </div>
+                </div>
+
+                <!-- Team Performance / LLM -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">LLM Performance</div>
+                            <div class="card-subtitle">Token throughput</div>
+                        </div>
+                        <div class="card-badge">This Week ▾</div>
+                    </div>
+                    <div style="margin-bottom:16px">
+                        <div class="stat-card-value green" style="font-size:36px">93.3%</div>
+                        <div class="stat-card-sub" style="margin-top:4px">
+                            <span class="tag up">↑ 3.84%</span>
+                            Increased vs last week
+                        </div>
+                    </div>
+                    <div class="bar-chart" style="height:100px">
+                        <div class="col"><div class="bars"><div class="bar green" style="height:70%"></div><div class="bar dark" style="height:50%"></div></div><div class="label">Sun</div></div>
+                        <div class="col"><div class="bars"><div class="bar green" style="height:85%"></div><div class="bar dark" style="height:60%"></div></div><div class="label">Mon</div></div>
+                        <div class="col"><div class="bars"><div class="bar green" style="height:90%"></div><div class="bar dark" style="height:55%"></div></div><div class="label">Tue</div></div>
+                        <div class="col"><div class="bars"><div class="bar green" style="height:80%"></div><div class="bar dark" style="height:65%"></div></div><div class="label">Wed</div></div>
+                        <div class="col"><div class="bars"><div class="bar green" style="height:95%"></div><div class="bar dark" style="height:70%"></div></div><div class="label">Thu</div></div>
+                    </div>
+                    <div style="display:flex;gap:16px;margin-top:12px;font-size:11px;color:var(--muted)">
+                        <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--accent)"></span> Gen tok/s</span>
+                        <span style="display:flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:2px;background:var(--text-strong)"></span> Prompt tok/s</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Row: Spark List + Memory -->
+            <div class="content-grid equal">
+                <!-- Spark List Table -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Spark Fleet</div>
+                        <div class="table-search" style="width:auto;flex:none">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                            <input type="text" placeholder="Search spark, ID, etc" style="width:140px">
+                        </div>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th>GPU</th>
+                                <th>Temp</th>
+                                <th>LLM</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <div class="table-avatar">
+                                        <div class="img">A</div>
+                                        <div class="info">
+                                            <div class="name">Spark Alpha</div>
+                                            <div class="id">192.168.1.10</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--success)"><span style="width:6px;height:6px;border-radius:50%;background:var(--success)"></span> Online</span></td>
+                                <td class="table-mono">84%</td>
+                                <td class="table-mono">68°C</td>
+                                <td class="table-mono" style="color:var(--accent)">42 tok/s</td>
+                                <td><button class="download-btn" onclick="showPage('spark-1')">View →</button></td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="table-avatar">
+                                        <div class="img">B</div>
+                                        <div class="info">
+                                            <div class="name">Spark Beta</div>
+                                            <div class="id">192.168.1.11</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--success)"><span style="width:6px;height:6px;border-radius:50%;background:var(--success)"></span> Online</span></td>
+                                <td class="table-mono">12%</td>
+                                <td class="table-mono">42°C</td>
+                                <td class="table-mono" style="color:var(--accent)">128 tok/s</td>
+                                <td><button class="download-btn" onclick="showPage('spark-2')">View →</button></td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <div class="table-avatar">
+                                        <div class="img" style="background:var(--danger-light);color:var(--danger)">G</div>
+                                        <div class="info">
+                                            <div class="name">Spark Gamma</div>
+                                            <div class="id">192.168.1.12</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--danger)"><span style="width:6px;height:6px;border-radius:50%;background:var(--danger)"></span> Offline</span></td>
+                                <td class="table-mono" style="color:var(--muted)">—</td>
+                                <td class="table-mono" style="color:var(--muted)">—</td>
+                                <td class="table-mono" style="color:var(--muted)">—</td>
+                                <td><button class="download-btn" onclick="showPage('spark-3')" style="color:var(--danger)">View →</button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Memory Overview -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Memory Overview</div>
+                        <div class="card-badge">All Sparks ▾</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:16px">
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
+                                <span style="font-weight:600">Spark Alpha — Unified Memory</span>
+                                <span class="table-mono" style="color:var(--accent)">77%</span>
+                            </div>
+                            <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:77%"></div></div>
+                            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px">
+                                <span>98.7 GB / 128 GB</span>
+                                <span>29.3 GB free</span>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
+                                <span style="font-weight:600">Spark Beta — Unified Memory</span>
+                                <span class="table-mono" style="color:var(--success)">33%</span>
+                            </div>
+                            <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:33%"></div></div>
+                            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px">
+                                <span>42.1 GB / 128 GB</span>
+                                <span>85.9 GB free</span>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
+                                <span style="font-weight:600">Spark Alpha — VRAM</span>
+                                <span class="table-mono" style="color:var(--warning)">75%</span>
+                            </div>
+                            <div class="metric-bar"><div class="metric-bar-fill bar-warning" style="width:75%"></div></div>
+                            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px">
+                                <span>72.4 GB / 96 GB</span>
+                                <span>23.6 GB free</span>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
+                                <span style="font-weight:600">Spark Beta — VRAM</span>
+                                <span class="table-mono" style="color:var(--success)">19%</span>
+                            </div>
+                            <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:19%"></div></div>
+                            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px">
+                                <span>18.2 GB / 96 GB</span>
+                                <span>77.8 GB free</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ SPARK ALPHA DETAIL ══════════════════════════ -->
+        <div id="page-spark-1" class="spark-page">
+            <button class="back-btn" onclick="showPage('overview')">← Back to overview</button>
+            <div class="header-bar">
+                <div class="greeting">
+                    <h1>Spark Alpha</h1>
+                    <p>NVIDIA DGX Spark · GB10 · ARM Neoverse V2</p>
+                </div>
+                <div class="header-actions" style="margin-left:auto">
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                        <span class="card-badge">128 GB HBM3e</span>
+                        <span class="card-badge">CUDA 12.8</span>
+                        <span class="card-badge">Samsung PM9D1a</span>
+                    </div>
+                    <button class="back-btn">✎ Edit</button>
+                </div>
+            </div>
+
+            <div class="stat-cards">
+                <div class="stat-card green">
+                    <div class="stat-card-header"><span class="stat-card-title">GPU Usage</span></div>
+                    <div class="stat-card-value green">84%</div>
+                    <div class="stat-card-sub"><span class="tag up">↑ High load</span></div>
+                </div>
+                <div class="stat-card amber">
+                    <div class="stat-card-header"><span class="stat-card-title">Temperature</span></div>
+                    <div class="stat-card-value amber">68°C</div>
+                    <div class="stat-card-sub">Normal range</div>
+                </div>
+                <div class="stat-card green">
+                    <div class="stat-card-header"><span class="stat-card-title">Power</span></div>
+                    <div class="stat-card-value" style="color:var(--text-strong)">187W</div>
+                    <div class="stat-card-sub">/ 250W TDP · ~210W total</div>
+                </div>
+                <div class="stat-card green">
+                    <div class="stat-card-header"><span class="stat-card-title">LLM Throughput</span></div>
+                    <div class="stat-card-value green">42</div>
+                    <div class="stat-card-sub">tok/s generation</div>
+                </div>
+            </div>
+
+            <div class="content-grid">
+                <!-- GPU Details -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">GPU & Memory</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                        <div class="metric-row">
+                            <span class="label">GPU Usage</span>
+                            <span class="value" style="color:var(--accent)">84%</span>
+                        </div>
+                        <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:84%"></div></div>
+
+                        <div class="metric-row">
+                            <span class="label">Temperature</span>
+                            <span class="value" style="color:var(--warning)">68°C</span>
+                        </div>
+                        <div class="metric-bar"><div class="metric-bar-fill bar-warning" style="width:68%"></div></div>
+
+                        <div class="metric-row">
+                            <span class="label">Power Draw</span>
+                            <span class="value">187W / 250W</span>
+                        </div>
+
+                        <div class="metric-row">
+                            <span class="label">VRAM Allocated</span>
+                            <span class="value" style="color:var(--accent)">72.4 / 96.0 GB</span>
+                        </div>
+                        <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:75%"></div></div>
+
+                        <div class="metric-row">
+                            <span class="label">Unified Memory</span>
+                            <span class="value" style="color:var(--accent)">98.7 / 128 GB</span>
+                        </div>
+                        <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:77%"></div></div>
+
+                        <div class="metric-row">
+                            <span class="label">OOM Risk</span>
+                            <span class="value" style="color:var(--success)">low</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CPU / RAM -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">CPU & RAM</div>
+                    </div>
+                    <div class="metric-row">
+                        <span class="label">CPU Usage</span>
+                        <span class="value">48%</span>
+                    </div>
+                    <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:48%"></div></div>
+
+                    <div class="metric-row">
+                        <span class="label">CPU Temperature</span>
+                        <span class="value">52°C</span>
+                    </div>
+
+                    <div class="metric-row">
+                        <span class="label">CPU Power</span>
+                        <span class="value">38W / 65W</span>
+                    </div>
+
+                    <div class="metric-row">
+                        <span class="label">RAM Used</span>
+                        <span class="value" style="color:var(--accent)">86.3 / 128 GB</span>
+                    </div>
+                    <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:67%"></div></div>
+                    <div style="font-size:11px;color:var(--muted);margin-top:4px">41.7 GB available</div>
+                </div>
+            </div>
+
+            <div class="content-grid">
+                <!-- Storage -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Storage</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:14px">
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                                <span style="font-weight:600">/</span>
+                                <span class="table-mono" style="color:var(--muted)">312 GB / 1.0 TB · 30%</span>
+                            </div>
+                            <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:30%"></div></div>
+                            <div style="display:flex;gap:16px;font-size:11px;color:var(--muted);margin-top:4px">
+                                <span>↑ 12 MB/s</span><span>↓ 48 MB/s</span>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                                <span style="font-weight:600">/home</span>
+                                <span class="table-mono" style="color:var(--muted)">186 GB / 1.0 TB · 18%</span>
+                            </div>
+                            <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:18%"></div></div>
+                            <div style="display:flex;gap:16px;font-size:11px;color:var(--muted);margin-top:4px">
+                                <span>↑ 2 MB/s</span><span>↓ 8 MB/s</span>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                                <span style="font-weight:600">/tmp</span>
+                                <span class="table-mono" style="color:var(--muted)">4 GB / 64 GB · 6%</span>
+                            </div>
+                            <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:6%"></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Network -->
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Network</div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:12px">
+                        <div style="padding-bottom:12px;border-bottom:1px solid var(--border)">
+                            <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:6px">
+                                <span>eth0</span>
+                                <span style="font-weight:400;font-size:11px;color:var(--muted)">25 GbE</span>
+                            </div>
+                            <div style="display:flex;gap:20px;font-size:12px;font-variant-numeric:tabular-nums">
+                                <span>↑ <span style="color:var(--accent);font-weight:600">24.8 MB/s</span></span>
+                                <span>↓ <span style="color:var(--success);font-weight:600">142.3 MB/s</span></span>
+                            </div>
+                        </div>
+                        <div style="padding-bottom:12px;border-bottom:1px solid var(--border)">
+                            <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:6px">
+                                <span>eth1</span>
+                                <span style="font-weight:400;font-size:11px;color:var(--muted)">25 GbE</span>
+                            </div>
+                            <div style="display:flex;gap:20px;font-size:12px;font-variant-numeric:tabular-nums">
+                                <span>↑ <span style="color:var(--accent);font-weight:600">1.2 MB/s</span></span>
+                                <span>↓ <span style="color:var(--success);font-weight:600">3.4 MB/s</span></span>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:6px">
+                                <span>docker0</span>
+                                <span style="font-weight:400;font-size:11px;color:var(--muted)">bridge</span>
+                            </div>
+                            <div style="display:flex;gap:20px;font-size:12px;font-variant-numeric:tabular-nums">
+                                <span>↑ <span style="color:var(--accent);font-weight:600">8.6 MB/s</span></span>
+                                <span>↓ <span style="color:var(--success);font-weight:600">12.1 MB/s</span></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LLM Full Width -->
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">LLM Server</div>
+                        <div class="card-subtitle" style="margin-top:4px">
+                            <span class="llm-badge">● llama.cpp</span>
+                            <span style="margin-left:8px">Qwen3-30B-A3B-Q4_K_M.gguf · port 8888</span>
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:40px;align-items:center">
+                    <div class="toks-big" style="margin:0;padding:0;border:none">
+                        <div class="num">42</div>
+                        <div class="unit">tok/s generation</div>
+                    </div>
+                    <div style="flex:1;display:flex;flex-direction:column;gap:14px">
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                                <span style="font-weight:600">Prompt throughput</span>
+                                <span class="table-mono">186 tok/s</span>
+                            </div>
+                            <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:62%"></div></div>
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                                <span style="font-weight:600">Generation throughput</span>
+                                <span class="table-mono" style="color:var(--accent)">42 tok/s</span>
+                            </div>
+                            <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:28%"></div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ SPARK BETA DETAIL ═══════════════════════════ -->
+        <div id="page-spark-2" class="spark-page">
+            <button class="back-btn" onclick="showPage('overview')">← Back to overview</button>
+            <div class="header-bar">
+                <div class="greeting">
+                    <h1>Spark Beta</h1>
+                    <p>NVIDIA DGX Spark · GB10 · ARM Neoverse V2</p>
+                </div>
+                <div class="header-actions" style="margin-left:auto">
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                        <span class="card-badge">128 GB HBM3e</span>
+                        <span class="card-badge">CUDA 12.8</span>
+                        <span class="card-badge">Samsung PM9D1a</span>
+                    </div>
+                    <button class="back-btn">✎ Edit</button>
+                </div>
+            </div>
+
+            <div class="stat-cards">
+                <div class="stat-card green">
+                    <div class="stat-card-header"><span class="stat-card-title">GPU Usage</span></div>
+                    <div class="stat-card-value" style="color:var(--text-strong)">12%</div>
+                    <div class="stat-card-sub"><span class="tag up">Low load</span></div>
+                </div>
+                <div class="stat-card green">
+                    <div class="stat-card-header"><span class="stat-card-title">Temperature</span></div>
+                    <div class="stat-card-value" style="color:var(--success)">42°C</div>
+                    <div class="stat-card-sub">Cool</div>
+                </div>
+                <div class="stat-card green">
+                    <div class="stat-card-header"><span class="stat-card-title">Power</span></div>
+                    <div class="stat-card-value" style="color:var(--text-strong)">45W</div>
+                    <div class="stat-card-sub">/ 250W TDP</div>
+                </div>
+                <div class="stat-card green">
+                    <div class="stat-card-header"><span class="stat-card-title">LLM Throughput</span></div>
+                    <div class="stat-card-value green">128</div>
+                    <div class="stat-card-sub">tok/s generation</div>
+                </div>
+            </div>
+
+            <div class="content-grid">
+                <div class="card">
+                    <div class="card-header"><div class="card-title">GPU & Memory</div></div>
+                    <div class="metric-row"><span class="label">GPU Usage</span><span class="value">12%</span></div>
+                    <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:12%"></div></div>
+                    <div class="metric-row"><span class="label">Temperature</span><span class="value" style="color:var(--success)">42°C</span></div>
+                    <div class="metric-row"><span class="label">Power Draw</span><span class="value">45W / 250W</span></div>
+                    <div class="metric-row"><span class="label">VRAM Allocated</span><span class="value">18.2 / 96.0 GB</span></div>
+                    <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:19%"></div></div>
+                    <div class="metric-row"><span class="label">Unified Memory</span><span class="value">42.1 / 128 GB</span></div>
+                    <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:33%"></div></div>
+                    <div class="metric-row"><span class="label">OOM Risk</span><span class="value" style="color:var(--success)">low</span></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><div class="card-title">CPU & RAM</div></div>
+                    <div class="metric-row"><span class="label">CPU Usage</span><span class="value">22%</span></div>
+                    <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:22%"></div></div>
+                    <div class="metric-row"><span class="label">CPU Temperature</span><span class="value" style="color:var(--success)">38°C</span></div>
+                    <div class="metric-row"><span class="label">CPU Power</span><span class="value">18W / 65W</span></div>
+                    <div class="metric-row"><span class="label">RAM Used</span><span class="value">52.8 / 128 GB</span></div>
+                    <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:41%"></div></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">LLM Server</div>
+                        <div class="card-subtitle" style="margin-top:4px">
+                            <span class="llm-badge">● sglang</span>
+                            <span style="margin-left:8px">Qwen3-8B-Q8_0.gguf · port 8888</span>
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:40px;align-items:center">
+                    <div class="toks-big" style="margin:0;padding:0;border:none">
+                        <div class="num">128</div>
+                        <div class="unit">tok/s generation</div>
+                    </div>
+                    <div style="flex:1;display:flex;flex-direction:column;gap:14px">
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="font-weight:600">Prompt throughput</span><span class="table-mono">412 tok/s</span></div>
+                            <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:82%"></div></div>
+                        </div>
+                        <div>
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="font-weight:600">Generation throughput</span><span class="table-mono" style="color:var(--accent)">128 tok/s</span></div>
+                            <div class="metric-bar"><div class="metric-bar-fill bar-green" style="width:64%"></div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ SPARK GAMMA (OFFLINE) ═══════════════════════ -->
+        <div id="page-spark-3" class="spark-page">
+            <button class="back-btn" onclick="showPage('overview')">← Back to overview</button>
+            <div class="header-bar">
+                <div class="greeting">
+                    <h1>Spark Gamma</h1>
+                    <p>NVIDIA DGX Spark · GB10 · ARM Neoverse V2</p>
+                </div>
+            </div>
+            <div class="card" style="text-align:center;padding:60px 20px">
+                <div style="width:56px;height:56px;border-radius:50%;background:var(--danger-light);color:var(--danger);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:24px">⚡</div>
+                <h2 style="font-size:16px;font-weight:600;margin-bottom:6px">Host unreachable</h2>
+                <p style="font-size:13px;color:var(--muted);max-width:400px;margin:0 auto">Spark Gamma is offline. Check network connectivity and SSH configuration.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showPage(id) {
+            document.querySelectorAll('[id^="page-"]').forEach(el => el.classList.remove('visible'));
+            const target = document.getElementById('page-' + id);
+            if (target) target.classList.add('visible');
+
+            document.querySelectorAll('.sidebar-item').forEach(btn => btn.classList.remove('active'));
+            const items = document.querySelectorAll('.sidebar-item');
+            if (id === 'overview') items[0].classList.add('active');
+            else if (id === 'spark-1') items[1].classList.add('active');
+            else if (id === 'spark-2') items[2].classList.add('active');
+            else if (id === 'spark-3') items[3].classList.add('active');
+        }
+    </script>
+</body>
+</html>

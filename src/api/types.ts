@@ -1,0 +1,188 @@
+// ─── Spark config (matches server/sparks.json) ────────────
+export interface SparkConfig {
+  id: string;
+  name: string;
+  lanIp: string;
+  cx7Ip?: string | null;
+  isLocal: boolean;
+  ssh: {
+    host: string;
+    user: string;
+    auth: "key" | "pass";
+    /** Request-only: never returned by GET/list */
+    password?: string;
+    /** Response-only: true when a password is held in server memory */
+    hasPassword?: boolean;
+  };
+  disabledDevices?: string[];
+  /** Interface names hidden from the Network panel main view */
+  disabledInterfaces?: string[];
+  /** HTTP port for the LLM server on this Spark (default 8888) */
+  llmPort?: number;
+  /** When true, storage is only updated on manual refresh, not auto-polled. */
+  storagePollDisabled?: boolean;
+}
+
+// ─── Hardware info ───────────────────────────────────────
+export interface HardwareInfo {
+  device: string;
+  cpuModel: string;
+  cpuCores: number;
+  totalMemoryGB: number;
+  gpuChip: string;
+  cudaDriver: string | null;
+  storageModel: string | null;
+}
+
+// ─── GPU metrics ─────────────────────────────────────────
+export interface GpuMetrics {
+  temperature: number;
+  usage: number;
+  power: {
+    draw: number;
+    limit: number;
+    /** Estimated total system power draw (GPU + CPU + CX7/peripherals). */
+    systemDraw?: number;
+  };
+  vram: {
+    used: number;
+    total: number;
+    percentage: number;
+    /** MemAvailable in MB — the real free memory in the shared pool. */
+    available: number;
+  };
+}
+
+// ─── CPU metrics ─────────────────────────────────────────
+export interface CpuMetrics {
+  usage: number;
+  temperature: number;
+  draw: number;
+  tdp: number;
+}
+
+// ─── RAM metrics ─────────────────────────────────────────
+export interface RamMetrics {
+  used: number;
+  total: number;
+  percentage: number;
+}
+
+// ─── Storage metrics ─────────────────────────────────────
+export interface StorageMetrics {
+  device: string;
+  label: string;
+  used: number;
+  total: number;
+  available: number;
+  percentage: number;
+  readSpeed: number;
+  writeSpeed: number;
+  /** Present when device is in disabledDevices; still returned for Settings UI */
+  disabled?: boolean;
+}
+
+// ─── Network metrics ─────────────────────────────────────
+export interface NetworkInterface {
+  name: string;
+  rxSpeed: number;
+  txSpeed: number;
+  /** IPv4 address, e.g. "192.168.1.143". null when unset. */
+  ip: string | null;
+  /** Interface operstate: "up" | "down" | "unknown" */
+  operstate: string;
+  /** Present when interface is in disabledInterfaces; still returned for Settings UI */
+  disabled?: boolean;
+}
+
+export interface NetworkMetrics {
+  primaryInterface: string | null;
+  linkSpeedMbps: number | null;
+  interfaces: NetworkInterface[];
+}
+
+// ─── Unified memory metrics ──────────────────────────────
+export interface UnifiedMemoryMetrics {
+  total: number;
+  gpuUsed: number;
+  cpuUsed: number;
+  used: number;
+  available: number;
+  percentage: number;
+  oomRisk: "low" | "medium" | "high";
+  bandwidth: {
+    current: number;
+    peak: number;
+  };
+}
+
+// ─── LLM metrics ─────────────────────────────────────────
+export interface LlmMetrics {
+  available: boolean;
+  backend: "vllm" | "llama.cpp" | "sglang" | null;
+  modelId: string | null;
+  modelPath: string | null;
+  contextLength: number | null;
+  /** GPU memory utilization for the LLM engine (0–1), e.g. 0.9. Only from vLLM internal info. */
+  gpuMemoryUtilization: number | null;
+  slotsActive: number;
+  slotsTotal: number;
+  generationTps: number;
+  prefillTps: number;
+  error: string | null;
+}
+
+// ─── Full metrics snapshot ────────────────────────────────
+export interface SparkMetrics {
+  timestamp: number;
+  gpu: GpuMetrics | null;
+  cpu: CpuMetrics | null;
+  ram: RamMetrics | null;
+  storage: StorageMetrics[];
+  network: NetworkMetrics | null;
+  unifiedMemory: UnifiedMemoryMetrics | null;
+  llm: LlmMetrics | null;
+}
+
+// ─── Spark snapshot (server pushes this) ──────────────────
+export interface SparkSnapshot {
+  id: string;
+  name: string;
+  online: boolean;
+  disabledDevices: string[];
+  disabledInterfaces: string[];
+  storagePollDisabled?: boolean;
+  /** LLM server port used by the probe for this Spark */
+  llmPort: number;
+  hardware: HardwareInfo;
+  metrics: SparkMetrics;
+}
+
+// ─── WebSocket envelope ───────────────────────────────────
+export interface WsSnapshot {
+  type: "snapshot";
+  sparks: SparkSnapshot[];
+  refreshInterval: number;
+}
+
+// ─── API responses ────────────────────────────────────────
+export interface Settings {
+  pollIntervalMs: number;
+  defaultLlmPort: number;
+  autoHideOffline: boolean;
+}
+
+export interface SparksListResponse {
+  sparks: SparkConfig[];
+}
+
+export interface SparkTestResponse {
+  id: string;
+  ssh: { ok: boolean; message: string };
+  llm: { ok: boolean; message: string };
+  ok: boolean;
+}
+
+export interface ApiError {
+  error: string;
+}

@@ -1,0 +1,41 @@
+services:
+  sparkdash:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - linux/arm64
+    container_name: sparkDash
+    restart: unless-stopped
+    # Auto-restart Node when ./server files change (no image rebuild)
+    command: ["node", "--watch", "server/index.js"]
+    ports:
+      - "5555:5555"
+    privileged: true
+    volumes:
+      # Live server code — edits apply after --watch reloads the process
+      - ./server:/app/server
+      # Live frontend build — run `npm run build` on the host, refresh browser
+      - ./dist:/app/dist:ro
+      # Mount host filesystem for local Spark metrics
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+      # Mount nvidia-smi + driver libs (fallback if nsenter host path fails)
+      - /usr/bin/nvidia-smi:/usr/bin/nvidia-smi:ro
+      - /usr/lib/aarch64-linux-gnu/libnvidia-ml.so.1:/usr/lib/aarch64-linux-gnu/libnvidia-ml.so.1:ro
+      # Config + encrypted secrets (passwords survive restarts)
+      - ./config:/app/config
+    environment:
+      - PORT=5555
+      - LLM_PORT=8888
+      - NODE_ENV=production
+      - HOST_PROC_PATH=/host/proc
+      - HOST_SYS_PATH=/host/sys
+      - HOST_ROOT_PATH=/host/root
+    networks:
+      - sparkdash-net
+
+networks:
+  sparkdash-net:
+    driver: bridge
