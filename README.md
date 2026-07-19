@@ -159,8 +159,6 @@ sparkDash/
 └── deploy.sh            Rebuild / recreate helpers
 ```
 
-For a deeper map of modules and invariants, see [CODEBASE.md](./CODEBASE.md).
-
 ---
 
 ## REST API
