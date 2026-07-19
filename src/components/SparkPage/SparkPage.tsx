@@ -64,7 +64,7 @@ export function SparkPage({ spark, onEdit }: SparkPageProps) {
     <div className="space-y-[18px]">
       <SparkHeader spark={spark} onEdit={onEdit} />
       <div className="spark-page grid gap-[18px] md:grid-cols-2">
-        <GpuPanel gpu={metrics.gpu} unifiedMemory={metrics.unifiedMemory} />
+        <GpuPanel gpu={metrics.gpu} />
         <CpuPanel cpu={metrics.cpu} ram={metrics.ram} unifiedMemory={metrics.unifiedMemory} />
         <StoragePanel
           storage={metrics.storage}

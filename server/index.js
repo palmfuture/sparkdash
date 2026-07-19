@@ -285,15 +285,10 @@ app.post("/api/sparks/:id/refresh/:domain", async (req, res) => {
       return res.status(400).json({ error: "Only 'storage' domain is supported" });
     }
     await monitor.refreshDomain(domain);
-    // Broadcast updated snapshot immediately
-    const payload = JSON.stringify({
-      type: "snapshot",
-      sparks: orderedSnapshots(),
-      refreshInterval: getSettings().pollIntervalMs,
-    });
-    wss.clients.forEach((client) => {
-      if (client.readyState === 1) client.send(payload);
-    });
+    // Broadcast updated snapshot immediately (force, ignoring the diff cache)
+    const payload = buildSnapshotPayload();
+    _lastBroadcastPayload = payload;
+    broadcastPayload(payload);
     res.json({ success: true, domain });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -466,13 +461,10 @@ app.get("*splat", (_req, res) => {
 const wss = new WebSocketServer({ server, path: "/ws" });
 wss.on("connection", (ws) => {
   console.log("[ws] client connected");
-  ws.send(
-    JSON.stringify({
-      type: "snapshot",
-      sparks: orderedSnapshots(),
-      refreshInterval: getSettings().pollIntervalMs,
-    })
-  );
+  // Send the initial snapshot through the same path the broadcast uses so the
+  // new client benefits from the same payload format (and bufferedAmount
+  // guard, although a freshly-open socket trivially passes it).
+  broadcastPayload(buildSnapshotPayload());
   ws.on("close", () => {
     console.log("[ws] client disconnected");
   });
@@ -480,18 +472,51 @@ wss.on("connection", (ws) => {
 
 // ─── Broadcast snapshot (dynamic interval) ────────────────
 let broadcastTimer = null;
+let _lastBroadcastPayload = null;
+
+/** Build the snapshot payload string. Centralized so broadcast + refresh share it. */
+function buildSnapshotPayload() {
+  return JSON.stringify({
+    type: "snapshot",
+    sparks: orderedSnapshots(),
+    refreshInterval: getSettings().pollIntervalMs,
+  });
+}
+
+/**
+ * Send a payload to every open WS client.
+ * - Drops clients whose send queue is backlogged (>1 MB) to avoid unbounded
+ *   buffering on slow/flaky connections (e.g. phone over spotty WiFi).
+ * - Returns the payload so callers can compare against the previous broadcast.
+ */
+function broadcastPayload(payload) {
+  wss.clients.forEach((client) => {
+    if (client.readyState !== 1) return; // OPEN only
+    if (client.bufferedAmount > 1_000_000) {
+      try {
+        client.close(1008, "client too slow");
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    try {
+      client.send(payload);
+    } catch {
+      /* per-client send failure — ignore, close handler will clean up */
+    }
+  });
+}
 
 function startBroadcast() {
   const interval = getSettings().pollIntervalMs;
   broadcastTimer = setInterval(() => {
-    const payload = JSON.stringify({
-      type: "snapshot",
-      sparks: orderedSnapshots(),
-      refreshInterval: getSettings().pollIntervalMs,
-    });
-    wss.clients.forEach((client) => {
-      if (client.readyState === 1) client.send(payload);
-    });
+    const payload = buildSnapshotPayload();
+    // Skip the broadcast entirely when nothing changed since the last tick.
+    // A 1s poll that produces identical snapshots becomes free for idle tabs.
+    if (_lastBroadcastPayload !== null && payload === _lastBroadcastPayload) return;
+    _lastBroadcastPayload = payload;
+    broadcastPayload(payload);
   }, interval);
 }
 
@@ -500,6 +525,7 @@ function restartBroadcast() {
     clearInterval(broadcastTimer);
     broadcastTimer = null;
   }
+  _lastBroadcastPayload = null; // force a fresh broadcast on the new cadence
   startBroadcast();
 }
 
@@ -512,5 +538,41 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`[sparkDash] WebSocket endpoint ws://0.0.0.0:${PORT}/ws`);
   startAllMonitors();
 });
+
+// ─── Graceful shutdown ─────────────────────────────────
+let _shuttingDown = false;
+function shutdown(signal) {
+  if (_shuttingDown) return;
+  _shuttingDown = true;
+  console.log(`[sparkDash] ${signal} received, shutting down…`);
+  try {
+    if (broadcastTimer) {
+      clearInterval(broadcastTimer);
+      broadcastTimer = null;
+    }
+    for (const m of monitors.values()) m.stop();
+    monitors.clear();
+  } catch (err) {
+    console.error("[sparkDash] error during shutdown:", err.message);
+  }
+  // Tell WS clients the server is going away, then close the server.
+  try {
+    wss.clients.forEach((c) => {
+      try {
+        c.close(1001, "server shutting down");
+      } catch {
+        /* ignore */
+      }
+    });
+  } catch {
+    /* ignore */
+  }
+  wss.close();
+  server.close(() => process.exit(0));
+  // Safety net: if server.close hangs (lingering keep-alive), force-exit.
+  setTimeout(() => process.exit(1), 3000).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 export { app, server, wss };

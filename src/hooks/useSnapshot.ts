@@ -14,7 +14,7 @@ export function useSnapshot() {
   const [connected, setConnected] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(OVERVIEW_ID);
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** When false, onclose must not schedule reconnect (unmount / intentional close). */
   const shouldReconnect = useRef(true);
 

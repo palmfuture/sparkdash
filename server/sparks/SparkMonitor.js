@@ -8,6 +8,7 @@ import {
   POLL_INTERVAL_STORAGE,
   POLL_INTERVAL_LLM,
   POLL_INTERVAL_BANDWIDTH,
+  POLL_INTERVAL_LIVENESS,
   LLM_PORT,
 } from "../config.js";
 
@@ -73,7 +74,7 @@ export class SparkMonitor {
     this._intervals.push(setInterval(() => this._pollDomain("memory"), POLL_INTERVAL_BANDWIDTH));
     this._intervals.push(setInterval(() => this._pollDomain("llm"), POLL_INTERVAL_LLM));
     // Liveness on a slightly slower cadence
-    this._intervals.push(setInterval(() => this._checkOnline(), 5000));
+    this._intervals.push(setInterval(() => this._checkOnline(), POLL_INTERVAL_LIVENESS));
     console.log(`[SparkMonitor] ${this.spark.id} started`);
   }
 
@@ -98,7 +99,13 @@ export class SparkMonitor {
       llmPort: this._llmPort(),
       hardware: this._getHardwareSummary(),
       metrics: {
-        timestamp: Date.now(),
+        // NOTE: no `timestamp` here on purpose. The broadcast path skips
+        // snapshots whose JSON is byte-identical to the previous one (see
+        // startBroadcast); a per-snapshot Date.now() would defeat that cache,
+        // forcing a broadcast + frontend re-render every tick even when all
+        // measured values are unchanged. The frontend does not consume a
+        // metrics timestamp; the WS receive time can serve if one is ever
+        // needed.
         gpu: this._metrics.gpu,
         cpu: this._metrics.cpu,
         ram: this._metrics.ram,
@@ -119,12 +126,17 @@ export class SparkMonitor {
         await this.collector.pingHost();
       } else {
         const result = await sshTest(this.spark);
+        // Re-check after the (up to 10s) SSH await — `stop()` may have fired
+        // mid-flight (removeSpark / updateSpark). Bail before mutating state or
+        // running into a stopped registry entry.
+        if (!this._running) return;
         if (!result.ok) throw new Error(result.message);
       }
       if (!this._running) return;
       this.online = true;
       this.lastOnlineOk = Date.now();
     } catch {
+      if (!this._running) return;
       if (!this.lastOnlineOk || Date.now() - this.lastOnlineOk > ONLINE_GRACE_MS) {
         this.online = false;
       }
@@ -154,30 +166,60 @@ export class SparkMonitor {
     if (domain === "storage" && this.spark.storagePollDisabled) return;
     this._inflight[domain] = true;
     try {
+      let result;
       switch (domain) {
         case "gpu":
-          this._metrics.gpu = await this.collector.collectGpu();
+          result = await this.collector.collectGpu();
           break;
         case "cpu":
-          this._metrics.cpu = await this.collector.collectCpu();
+          result = await this.collector.collectCpu();
           break;
         case "ram":
-          this._metrics.ram = await this.collector.collectRam();
+          result = await this.collector.collectRam();
           break;
         case "network":
-          this._metrics.network = await this.collector.collectNetwork();
+          result = await this.collector.collectNetwork();
           break;
         case "storage":
-          this._metrics.storage = await this.collector.collectStorage();
+          result = await this.collector.collectStorage();
           break;
         case "memory":
-          this._metrics.unifiedMemory = await this.collector.collectUnifiedMemory();
+          result = await this.collector.collectUnifiedMemory();
           break;
         case "llm":
-          this._metrics.llm = await this.llmProbe.probe();
+          result = await this.llmProbe.probe();
           break;
       }
-      if (this._running) this._lastUpdate[domain] = Date.now();
+      // Re-check after the await — `stop()`/`updateSpark()` may have torn
+      // this monitor down mid-flight. Writing `_metrics` on a dead monitor
+      // isn't user-visible (monitors.delete already happened) but it's a
+      // latent class of bug worth killing, and a replaced monitor could
+      // otherwise race the tail-end await onto the wrong object.
+      if (!this._running) return;
+      switch (domain) {
+        case "gpu":
+          this._metrics.gpu = result;
+          break;
+        case "cpu":
+          this._metrics.cpu = result;
+          break;
+        case "ram":
+          this._metrics.ram = result;
+          break;
+        case "network":
+          this._metrics.network = result;
+          break;
+        case "storage":
+          this._metrics.storage = result;
+          break;
+        case "memory":
+          this._metrics.unifiedMemory = result;
+          break;
+        case "llm":
+          this._metrics.llm = result;
+          break;
+      }
+      this._lastUpdate[domain] = Date.now();
     } catch (err) {
       console.error(`[SparkMonitor] ${this.spark.id} ${domain} poll error:`, err.message);
     } finally {
@@ -190,16 +232,19 @@ export class SparkMonitor {
     if (this._inflight[domain]) return;
     this._inflight[domain] = true;
     try {
+      let result;
       switch (domain) {
         case "storage":
-          this._metrics.storage = await this.collector.collectStorage();
+          result = await this.collector.collectStorage();
           break;
         default:
           // Fall back to _pollDomain for other domains
           this._inflight[domain] = false;
           return this._pollDomain(domain);
       }
-      if (this._running) this._lastUpdate[domain] = Date.now();
+      if (!this._running) return;
+      this._metrics.storage = result;
+      this._lastUpdate[domain] = Date.now();
     } catch (err) {
       console.error(`[SparkMonitor] ${this.spark.id} ${domain} refresh error:`, err.message);
     } finally {

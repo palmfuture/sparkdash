@@ -6,17 +6,47 @@
  * Password auth uses sshpass -e (password via env), not -p on the command line.
  */
 import { execFile } from "child_process";
-import { execSync } from "child_process";
+import fs from "fs";
 import { SSH_CONNECT_TIMEOUT } from "../config.js";
 import { isAllowedTargetHost, isValidSshUser } from "../validate.js";
 
-// Check if sshpass is available
+// Detect sshpass without shelling out to `which` on every cold call —
+// checking PATH entries directly is faster and avoids spawning a shell.
 let _sshpassAvailable = null;
 function sshpassAvailable() {
   if (_sshpassAvailable !== null) return _sshpassAvailable;
   try {
-    execSync("which sshpass", { stdio: "ignore" });
-    _sshpassAvailable = true;
+    const candidates = [
+      "/usr/bin/sshpass",
+      "/usr/local/bin/sshpass",
+      "/bin/sshpass",
+      "/opt/homebrew/bin/sshpass",
+    ];
+    for (const p of candidates) {
+      try {
+        if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+          _sshpassAvailable = true;
+          return _sshpassAvailable;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    // Fall back to a PATH scan in case sshpass lives somewhere unusual.
+    const pathDirs = (process.env.PATH || "").split(":");
+    for (const dir of pathDirs) {
+      if (!dir) continue;
+      try {
+        const candidate = `${dir}/sshpass`;
+        if (fs.existsSync(candidate)) {
+          _sshpassAvailable = true;
+          return _sshpassAvailable;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    _sshpassAvailable = false;
   } catch {
     _sshpassAvailable = false;
   }
@@ -63,7 +93,19 @@ export async function sshExec(spark, cmd) {
   // when using execFile without a shell. `--` stops option parsing before destination.
   let file;
   let args;
-  let env = { ...process.env };
+  // Minimal child env — only what ssh/sshpass actually need. Spreading the full
+  // `process.env` would leak every host var (AWS_*, GITHUB_TOKEN, etc.) into the
+  // child; this whitelist scopes to PATH, HOME, USER/LOGNAME (ssh logging +
+  // known_hosts mixing), TERM, and SSH_AUTH_SOCK so agent-forwarded key auth
+  // still works. SSHPASS is added below only for password auth.
+  const env = {
+    PATH: process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    HOME: process.env.HOME || "/root",
+    USER: process.env.USER,
+    LOGNAME: process.env.LOGNAME,
+    TERM: process.env.TERM || "xterm",
+    ...(process.env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK } : {}),
+  };
 
   if (auth === "pass") {
     if (!password) {
@@ -75,7 +117,7 @@ export async function sshExec(spark, cmd) {
       throw new Error(`sshpass is not installed. Install it with: sudo apt-get install sshpass`);
     }
     // Password via env (sshpass -e) — never on argv or in process list as -p
-    env = { ...env, SSHPASS: password };
+    env.SSHPASS = password;
     file = "sshpass";
     args = ["-e", "ssh", ...baseOpts, "--", remote, cmd];
   } else {
@@ -112,14 +154,22 @@ export async function sshTest(spark) {
 /**
  * Test LLM server connectivity.
  * Returns { ok: boolean, message: string }
+ *
+ * `port` is required at call sites today (both pass `resolveLlmPort(spark)`).
+ * We accept `null`/`undefined` defensively and resolve from `spark.llmPort`
+ * so any future caller that forgets the arg can't silently hit port 8888.
  */
-export async function llmTest(spark, port = 8888) {
+export async function llmTest(spark, port) {
   try {
     const host = spark.lanIp;
     if (!isAllowedTargetHost(host)) {
       return { ok: false, message: `Invalid or disallowed lanIp: ${host}` };
     }
-    const url = `http://${host}:${port}/v1/models`;
+    const resolvedPort =
+      Number.isInteger(port) && port >= 1 && port <= 65535
+        ? port
+        : Number(spark?.llmPort) || 8888;
+    const url = `http://${host}:${resolvedPort}/v1/models`;
     const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
     const data = await res.json();
     return { ok: res.ok, message: `Model: ${data?.data?.[0]?.id || "unknown"}` };

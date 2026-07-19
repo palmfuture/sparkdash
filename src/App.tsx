@@ -9,7 +9,7 @@ import { SparkPage } from "./components/SparkPage/SparkPage";
 import { OverviewPage } from "./components/OverviewPage/OverviewPage";
 import { ThemeSwitch } from "./components/ThemeSwitch";
 import { SettingsDialog } from "./components/SettingsDialog";
-import { GearIcon } from "./components/ui/icons";
+import { GearIcon, BoltIcon } from "./components/ui/icons";
 import { OVERVIEW_ID } from "./constants";
 import type { Settings, SparkSnapshot } from "./api/types";
 
@@ -37,7 +37,6 @@ function placeholderSnapshot(
       storageModel: null,
     },
     metrics: {
-      timestamp: Date.now(),
       gpu: null,
       cpu: null,
       ram: null,
@@ -150,7 +149,7 @@ function App() {
             onClick={() => navigate(OVERVIEW_ID)}
             className="logo-pill"
           >
-            <span className="dot-glow-accent inline-block h-2 w-2 rounded-full bg-accent" aria-hidden />
+            <BoltIcon className="h-3.5 w-3.5 text-accent" />
             <span>
               spark<span className="logo-pill-dash">Dash</span>
             </span>

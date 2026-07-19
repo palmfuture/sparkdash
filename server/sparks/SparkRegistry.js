@@ -1,6 +1,8 @@
 import fs from "fs";
 import { SPARKS_JSON_PATH, LLM_PORT } from "../config.js";
 import { loadSecrets, saveSecrets } from "../secretsStore.js";
+import { atomicWrite } from "../util/atomicWrite.js";
+import { isValidSparkId } from "../validate.js";
 
 /**
  * SparkRegistry — loads, persists, and emits change events for the Spark list.
@@ -54,9 +56,14 @@ export class SparkRegistry {
   }
 
   // ─── CRUD ───────────────────────────────────────────────
-  /** Add a new Spark. Throws if ID already exists. */
+  /** Add a new Spark. Throws if ID already exists or is malformed. */
   addSpark(config) {
     if (!config.id) throw new Error("Spark config must have an 'id'");
+    if (!isValidSparkId(config.id)) {
+      throw new Error(
+        "Invalid Spark id: allowed characters are a-z A-Z 0-9 . _ -, length 1–64, and reserved names are not allowed"
+      );
+    }
     if (this.getSpark(config.id)) throw new Error(`Spark ${config.id} already exists`);
     const spark = this._normalizeConfig(config);
     this._storePassword(spark.id, config?.ssh?.password);
@@ -195,7 +202,10 @@ export class SparkRegistry {
         return { ...s, ssh };
       });
       const data = { sparks };
-      fs.writeFileSync(SPARKS_JSON_PATH, JSON.stringify(data, null, 2) + "\n", "utf-8");
+      // Atomic write (tmp + rename) — a SIGKILL/power loss mid-write must not
+      // truncate the registry and silently drop every Spark on next restart.
+      // 0o644 keeps the registry readable so root/non-root container users share it.
+      atomicWrite(SPARKS_JSON_PATH, JSON.stringify(data, null, 2) + "\n", 0o644);
     } catch (err) {
       console.error("[SparkRegistry] Failed to save sparks.json:", err.message);
     }

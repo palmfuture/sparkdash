@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { LlmMetrics } from "../../api/types";
-import { updateLlmPort, runLlmBench } from "../../api/client";
+import { updateLlmPort } from "../../api/client";
 import { Sparkline } from "../ui/Sparkline";
 import { Panel } from "../ui/Panel";
 import { BotIcon, GearIcon } from "../ui/icons";
@@ -34,8 +34,6 @@ function BackendBadge({ backend }: { backend: string | null }) {
 
 export function LlmPanel({ llm, sparkId, llmPort, onLlmPortChange, className }: LlmPanelProps) {
   const [genHistory, setGenHistory] = useState<number[]>([]);
-  const [benchmarking, setBenchmarking] = useState(false);
-  const [benchResult, setBenchResult] = useState<{ generationTps: number; totalMs: number; promptTokens: number; completionTokens: number } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [portDraft, setPortDraft] = useState(String(llmPort));
   const [saving, setSaving] = useState(false);
@@ -67,26 +65,6 @@ export function LlmPanel({ llm, sparkId, llmPort, onLlmPortChange, className }: 
   useEffect(() => {
     setGenHistory((prev) => [...prev.slice(-30), generationTps]);
   }, [generationTps]);
-
-  const handleBenchmark = async () => {
-    setBenchmarking(true);
-    setBenchResult(null);
-    try {
-      const result = await runLlmBench(sparkId);
-      if (result.ok && result.generationTps != null) {
-        setBenchResult({
-          generationTps: result.generationTps,
-          totalMs: result.totalMs ?? 0,
-          promptTokens: result.promptTokens ?? 0,
-          completionTokens: result.completionTokens ?? 0,
-        });
-      }
-    } catch (err) {
-      console.error("Benchmark failed:", err);
-    } finally {
-      setBenchmarking(false);
-    }
-  };
 
   const parsedPort = (() => {
     const n = parseInt(portDraft, 10);
@@ -127,16 +105,6 @@ export function LlmPanel({ llm, sparkId, llmPort, onLlmPortChange, className }: 
       className={`panel-llm ${className}`}
       actions={
         <div className="flex items-center gap-1.5">
-          {false && available && !showSettings && (
-            <button
-              type="button"
-              onClick={handleBenchmark}
-              disabled={benchmarking}
-              className="rounded border border-border px-2 py-0.5 text-[10px] text-muted hover:bg-surface-hover disabled:opacity-50"
-            >
-              {benchmarking ? "Running…" : "Run benchmark"}
-            </button>
-          )}
           <button
             type="button"
             title={showSettings ? "Done" : "LLM settings"}
@@ -218,17 +186,17 @@ export function LlmPanel({ llm, sparkId, llmPort, onLlmPortChange, className }: 
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <BackendBadge backend={llm?.backend ?? null} />
             {llm?.modelId && (
               <span
-                className="max-w-[200px] truncate text-xs text-text"
+                className="min-w-0 flex-1 truncate text-xs text-text"
                 title={llm.modelId}
               >
                 {llm.modelId}
               </span>
             )}
-            <span className="ml-auto shrink-0 font-tabular text-[10px] text-muted">:{llmPort}</span>
+            <span className="shrink-0 font-tabular text-[10px] text-muted">:{llmPort}</span>
           </div>
           {llm?.modelPath && (
             <div className="-mt-1.5 truncate text-[10px] text-muted" title={llm.modelPath}>
@@ -245,16 +213,6 @@ export function LlmPanel({ llm, sparkId, llmPort, onLlmPortChange, className }: 
               </span>
             </div>
           </div>
-
-          {benchResult && (
-            <div className="flex items-center justify-between rounded-md border border-accent/30 bg-accent-soft px-3 py-1.5 text-xs">
-              <span className="text-muted">Benchmark</span>
-              <span className="font-tabular text-accent">
-                {benchResult.generationTps.toFixed(1)} tok/s
-                <span className="text-muted"> · {benchResult.completionTokens} tok · {benchResult.totalMs}ms</span>
-              </span>
-            </div>
-          )}
 
           <div className="grid grid-cols-3 gap-2 border-t border-border pt-3">
             <div className="space-y-0.5">

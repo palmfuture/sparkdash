@@ -27,8 +27,19 @@ function useEscape(onClose: () => void) {
   }, [onClose]);
 }
 
-export function EditSparkDialog({ open, sparkId, onClose, onSaved }: EditSparkDialogProps) {
+export function EditSparkDialog({
+  open,
+  sparkId,
+  onClose,
+  onSaved,
+  onDeleted,
+}: EditSparkDialogProps) {
   const [config, setConfig] = useState<SparkConfig | null>(null);
+  /** Snapshot of the Spark config as last fetched from the server. Used to
+   *  detect form-vs-saved divergence so Test can target what the user is
+   *  actually looking at (vs. the stored config the registered test route
+   *  would read). */
+  const [savedConfig, setSavedConfig] = useState<SparkConfig | null>(null);
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -42,6 +53,7 @@ export function EditSparkDialog({ open, sparkId, onClose, onSaved }: EditSparkDi
   useEffect(() => {
     if (!open || !sparkId) {
       setConfig(null);
+      setSavedConfig(null);
       setPassword("");
       setTestResult(null);
       setError(null);
@@ -55,6 +67,7 @@ export function EditSparkDialog({ open, sparkId, onClose, onSaved }: EditSparkDi
         if (cancelled) return;
         const found = res.sparks.find((s) => s.id === sparkId) || null;
         setConfig(found);
+        setSavedConfig(found);
         if (!found) setError("Spark not found");
       })
       .catch((err: Error) => {
@@ -117,8 +130,26 @@ export function EditSparkDialog({ open, sparkId, onClose, onSaved }: EditSparkDi
         setSavedPasswordNote("Password saved.");
       }
 
-      // Prefer registered test (uses stored password); fall back to ephemeral
-      const result = password
+      // Decide which route to hit. The registered route (`POST /api/sparks/:id/test`)
+      // is preferred — it reads the already-stored password from server memory so the
+      // secret never transits the wire twice. BUT it tests the *persisted* Spark
+      // config, while the user may be staring at a form with unsaved edits (e.g. a
+      // new LAN IP). When any host-side field diverges from what's on disk, fall
+      // back to the ephemeral test path so we test what the user is actually
+      // looking at. Password-only changes do NOT count as dirty: the password was
+      // already persisted above via setSparkPassword, so the registered route can
+      // read it from memory — sending it again via testSparkConfig would duplicate
+      // the wire transit (the exact pattern H7 was written to remove).
+      const formDirty =
+        !savedConfig ||
+        config.lanIp !== savedConfig.lanIp ||
+        (config.cx7Ip ?? null) !== (savedConfig.cx7Ip ?? null) ||
+        config.isLocal !== savedConfig.isLocal ||
+        (config.ssh?.host || config.lanIp) !== (savedConfig.ssh?.host || savedConfig.lanIp) ||
+        config.ssh?.user !== savedConfig.ssh?.user ||
+        config.ssh?.auth !== savedConfig.ssh?.auth;
+
+      const result = formDirty
         ? await testSparkConfig({
             ...config,
             ssh: {

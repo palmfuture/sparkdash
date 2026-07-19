@@ -51,6 +51,26 @@ export function isValidSshUser(user) {
 }
 
 /**
+ * Reserved Spark ids that must never be accepted from an API client.
+ * Matches the frontend `OVERVIEW_ID` constant (kept in sync manually — it is
+ * a single value and duplicated across the boundary on purpose).
+ */
+export const RESERVED_SPARK_IDS = Object.freeze(new Set(["__overview__"]));
+
+/**
+ * Validate a client-supplied Spark id. Same character class as the SSH user
+ * regex (no path traversal, no shell metacharacters), 1–64 chars, and not a
+ * reserved id. The registry stores the id as a JSON key (no path-injection),
+ * but rejecting early avoids accidental collisions with reserved tab ids.
+ */
+export function isValidSparkId(id) {
+  if (typeof id !== "string") return false;
+  if (!/^[a-zA-Z0-9._-]{1,64}$/.test(id)) return false;
+  if (RESERVED_SPARK_IDS.has(id)) return false;
+  return true;
+}
+
+/**
  * Validate fields used for SSH/LLM probes. Returns null if ok, else error message.
  * @param {{ lanIp?: string, ssh?: { host?: string, user?: string } }} body
  */

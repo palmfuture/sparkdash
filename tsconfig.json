@@ -12,12 +12,9 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "./dist",
-    "rootDir": ".",
-    "baseUrl": ".",
+    // Allow `import Foo from "./Foo.tsx"` (IDE-default style). Requires noEmit
+    // (already set) — the bundler (Vite) still strips extensions at build time.
+    "allowImportingTsExtensions": true,
     "paths": {
       "@/*": ["./src/*"]
     }

@@ -14,6 +14,7 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { SPARKS_SECRETS_PATH, SECRETS_KEY_PATH } from "./config.js";
+import { atomicWrite } from "./util/atomicWrite.js";
 
 const ALGO = "aes-256-gcm";
 const IV_LEN = 12;
@@ -105,64 +106,6 @@ function decrypt(blobB64, key) {
   const decipher = crypto.createDecipheriv(ALGO, key, iv);
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
-}
-
-/**
- * Atomic write that works even if an older root-owned 0600 file is in the way.
- * @param {string} filePath
- * @param {string} contents
- * @param {number} [mode=0o600]
- */
-function atomicWrite(filePath, contents, mode = 0o600) {
-  ensureDir(filePath);
-  const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, contents, { mode });
-  try {
-    fs.chmodSync(tmp, mode);
-  } catch {
-    /* best-effort */
-  }
-  try {
-    fs.renameSync(tmp, filePath);
-  } catch {
-    // rename over root-owned file can fail — try unlink then rename / copy
-    try {
-      if (fs.existsSync(filePath)) {
-        try {
-          fs.chmodSync(filePath, 0o666);
-        } catch {
-          /* ignore */
-        }
-        fs.unlinkSync(filePath);
-      }
-      fs.renameSync(tmp, filePath);
-    } catch (err2) {
-      // Last resort: direct overwrite (may work when rename doesn't)
-      try {
-        fs.writeFileSync(filePath, contents, { mode });
-        try {
-          fs.unlinkSync(tmp);
-        } catch {
-          /* ignore */
-        }
-      } catch (err3) {
-        try {
-          fs.unlinkSync(tmp);
-        } catch {
-          /* ignore */
-        }
-        throw new Error(
-          `Failed to write ${filePath}: ${err3.message}. ` +
-            `If this is a root-owned file: sudo chown $(id -u):$(id -g) ${filePath}`
-        );
-      }
-    }
-  }
-  try {
-    fs.chmodSync(filePath, mode);
-  } catch {
-    /* best-effort */
-  }
 }
 
 /**

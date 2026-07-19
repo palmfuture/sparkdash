@@ -134,7 +134,6 @@ export interface LlmMetrics {
 
 // ─── Full metrics snapshot ────────────────────────────────
 export interface SparkMetrics {
-  timestamp: number;
   gpu: GpuMetrics | null;
   cpu: CpuMetrics | null;
   ram: RamMetrics | null;

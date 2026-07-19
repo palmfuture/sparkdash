@@ -155,8 +155,8 @@ export class LlmProbe {
         const modelsData = await modelsRes.json();
         const model = modelsData?.data?.[0];
         this.modelId = model?.id || null;
-	        this.contextLength = model?.max_model_len || null;
-	      }
+        this.contextLength = model?.max_model_len || null;
+      }
     } catch {}
 
     if (!modelsOk) {
@@ -243,11 +243,11 @@ export class LlmProbe {
       try {
         const mRes = await this._fetch(`${this.baseUrl}/metrics`);
         if (mRes.ok) {
-	          const txt = await mRes.text();
+          const txt = await mRes.text();
 
-	          // Running requests as slotsActive
-	          const running = this._getVllmMetric(txt, "num_requests_running");
-	          if (running != null) this.slotsActive = Math.round(running);
+          // Running requests as slotsActive
+          const running = this._getVllmMetric(txt, "num_requests_running");
+          if (running != null) this.slotsActive = Math.round(running);
 
           // Engine sleep state (0 = active, 1 = sleeping)
           if (this.gpuMemoryUtilization == null) {

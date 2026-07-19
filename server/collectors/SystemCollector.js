@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { HOST_PATHS, GPU_MEMORY_JSON_PATH, DGX_SPARK } from "../config.js";
+import { HOST_PATHS, GPU_MEMORY_JSON_PATH, DGX_SPARK, HARDWARE_DEFAULTS } from "../config.js";
 import { sshExec } from "./ssh.js";
 
 /**
@@ -16,9 +16,15 @@ export class SystemCollector {
     // Rate-tracking baselines
     this.lastNetworkStats = new Map();
     this.lastCpuStat = null;
+    /** Last computed CPU usage percentage (0-100) — used by GPU system-draw estimate. */
+    this.lastCpuUsagePct = 0;
     this.lastRaplReading = null;
     this.lastDiskIO = new Map();
     this.currentDiskIOSpeeds = new Map();
+
+    // Cached ARM detection (resolved lazily once; /proc/cpuinfo never changes
+    // mid-process). Avoids a redundant host read on every CPU poll.
+    this._isArmCached = null;
 
     // GPU VRAM per-PID cache
     this.nvidiaComputeAppsCache = new Map();
@@ -43,16 +49,23 @@ export class SystemCollector {
   async collectCpu() {
     if (!this.spark.isLocal) return this._getRemoteCpu();
     try {
-      const [usage, temp, power] = await Promise.all([
-        this._getCPUUsage(),
-        this._getCPUTemperature(),
-        this._getCPUPower(),
-      ]);
-      // Compute percentage from raw usage data
+      // Read /proc/stat once and compute usage BEFORE estimating power.
+      // Previously _getCPUPower re-read /proc/stat in parallel with _getCPUUsage,
+      // racing on lastCpuStat and producing 0% (idle power) on the first poll.
+      const usage = await this._getCPUUsage();
       const totalDiff = usage.total - (this.lastCpuStat?.total || usage.total);
       const usedDiff = usage.used - (this.lastCpuStat?.used || usage.used);
       const cpuPercentage = totalDiff > 0 ? Math.round((usedDiff / totalDiff) * 100) : 0;
+      const usageFraction = totalDiff > 0 ? usedDiff / totalDiff : 0;
       this.lastCpuStat = usage;
+      this.lastCpuUsagePct = cpuPercentage;
+
+      // Temperature and power can run in parallel — power is now a pure
+      // function of the usage fraction (no extra /proc/stat read).
+      const [temp, power] = await Promise.all([
+        this._getCPUTemperature(),
+        this._getCPUPower(usageFraction),
+      ]);
       return { usage: cpuPercentage, temperature: temp, ...power };
     } catch (err) {
       console.error(`[SystemCollector] CPU error for ${this.spark.id}:`, err.message);
@@ -323,25 +336,47 @@ export class SystemCollector {
     return 0;
   }
 
-  async _getCPUPower() {
-    // ARM/Neoverse estimation (DGX Spark)
+  /**
+   * Resolve and cache whether this host reports an ARM/Neoverse-compatible
+   * CPU. `/proc/cpuinfo` is static during a process lifetime, so we read it
+   * once instead of on every poll (the previous implementation did a host
+   * read on every `_getCPUPower` call — once per CPU poll per Spark).
+   * @returns {Promise<boolean>}
+   */
+  async _isArm() {
+    if (this._isArmCached !== null) return this._isArmCached;
     try {
       const cpuinfo = await this._readHostFile("/proc/cpuinfo");
-      if (/CPU architecture:\s*[89]|aarch64|ARMv[89]|armv[89]/i.test(cpuinfo)) {
-        const cpuStat = this._parseCPUUsage(await this._readHostFile("/proc/stat"));
-        const totalDiff = cpuStat.total - (this.lastCpuStat?.total || cpuStat.total);
-        const usedDiff = cpuStat.used - (this.lastCpuStat?.used || cpuStat.used);
-        const usage = totalDiff > 0 ? usedDiff / totalDiff : 0;
-        // NOTE: do NOT set this.lastCpuStat here — it's managed by collectCpu()
-        const tdp = 65;
-        const idleWatts = tdp * 0.08;
-        const draw = idleWatts + (tdp - idleWatts) * Math.min(usage, 1);
-        return { draw: Math.round(draw * 10) / 10, tdp: Math.round(tdp) };
-      }
-    } catch {}
+      this._isArmCached = /CPU architecture:\s*[89]|aarch64|ARMv[89]|armv[89]/i.test(cpuinfo);
+    } catch {
+      this._isArmCached = false;
+    }
+    return this._isArmCached;
+  }
 
-    // Fallback: return default
-    return { draw: 0, tdp: 0 };
+  /**
+   * Estimate CPU power draw from a usage fraction (0–1).
+   *
+   * `usageFraction` is the CPU usage measured at the caller's `/proc/stat` read
+   * — compute it once and pass it here to avoid racing `lastCpuStat` (the
+   * earlier implementation re-read `/proc/stat` in parallel with `collectCpu()`
+   * and produced an idle reading on the first poll).
+   *
+   * ARM/Neoverse chips use the GB10 65W TDP. Non-ARM hosts fall back to the
+   * generic 185W TDP — never 0/0, which previously rendered the panel as
+   * "0W / 0W", indistinguishable from "no CPU present."
+   *
+   * @param {number} [usageFraction]  0–1 CPU usage fraction. Omitted == use the
+   *   last measured percentage (used by GPU system-draw estimate).
+   */
+  async _getCPUPower(usageFraction) {
+    const isArm = await this._isArm();
+    const tdp = isArm ? 65 : HARDWARE_DEFAULTS.CPU_TDP_FALLBACK;
+    let frac = typeof usageFraction === "number" ? usageFraction : this.lastCpuUsagePct / 100;
+    if (!Number.isFinite(frac) || frac < 0) frac = 0;
+    const idleWatts = tdp * 0.08;
+    const draw = idleWatts + (tdp - idleWatts) * Math.min(frac, 1);
+    return { draw: Math.round(draw * 10) / 10, tdp: Math.round(tdp) };
   }
 
   // ─── RAM helpers ─────────────────────────────────────────

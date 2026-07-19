@@ -4,9 +4,14 @@ const BASE = "";
 
 // ─── Generic fetch wrapper ────────────────────────────────
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
+  // Only set Content-Type for requests that actually carry a body. Setting it
+  // on GET/DELETE was a no-op but could trigger an unnecessary CORS preflight
+  // (OPTIONS) in some proxy setups.
+  const headers: Record<string, string> = {};
+  if (opts?.body) headers["Content-Type"] = "application/json";
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...opts,
+    headers: { ...headers, ...(opts?.headers as Record<string, string> | undefined) },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));

@@ -1,6 +1,6 @@
 {
   "name": "sparkdash",
-  "version": "1.0.0",
+  "version": "1.0",
   "description": "sparkDash — Multi-DGX Spark Monitoring Dashboard",
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "dev:server": "node --watch server/index.js",
     "dev:client": "vite",
     "build": "vite build",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "start": "node server/index.js",
     "docker:up": "docker compose up -d",
@@ -18,9 +19,10 @@
     "frontend": "npm run build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["nvidia", "dgx-spark", "gb10", "monitoring", "dashboard", "gpu", "llm"],
+  "author": "Mia'a AI Lab",
+  "homepage": "https://x.com/MiaAI_lab",
+  "license": "MIT",
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

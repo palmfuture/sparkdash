@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { atomicWrite } from "./util/atomicWrite.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,11 +55,9 @@ export function loadSettings() {
 /** Persist current settings to disk. */
 export function saveSettings() {
   try {
-    const dir = path.dirname(SETTINGS_PATH);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(_settings, null, 2) + "\n", "utf-8");
+    // Atomic write (tmp + rename) — a SIGKILL/power loss mid-write must not
+    // truncate settings.json. atomicWrite ensures the dir is created.
+    atomicWrite(SETTINGS_PATH, JSON.stringify(_settings, null, 2) + "\n", 0o644);
   } catch (err) {
     console.error("[settings] Failed to save settings.json:", err.message);
   }

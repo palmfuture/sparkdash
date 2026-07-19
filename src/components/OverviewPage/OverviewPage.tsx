@@ -26,11 +26,13 @@ function MiniStat({
   value,
   tone = "default",
   bold = true,
+  title,
 }: {
   label: string;
   value: string;
   tone?: "default" | "accent" | "warning" | "danger" | "success";
   bold?: boolean;
+  title?: string;
 }) {
   const toneClass =
     tone === "danger"
@@ -43,9 +45,12 @@ function MiniStat({
             ? "text-success"
             : "text-text";
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex min-w-0 flex-col gap-0.5">
       <span className="text-[10px] tracking-wide text-muted">{label}</span>
-      <span className={`font-tabular text-[13px] whitespace-nowrap ${bold ? "font-semibold" : ""} ${toneClass}`}>{value}</span>
+      <span
+        className={`font-tabular text-[13px] truncate ${bold ? "font-semibold" : ""} ${toneClass}`}
+        title={title}
+      >{value}</span>
     </div>
   );
 }
@@ -145,9 +150,12 @@ function SparkCard({ spark, onSelect }: { spark: SparkSnapshot; onSelect?: (id: 
               />
             )}
             {(() => {
-              const rootDisk = spark.metrics.storage.find(
-                (d) => d.device === "nvme0n1p2"
-              );
+              // Find the root disk by label "/" (the collector maps the host
+              // root mount to that label). Fall back to the GB10 partition name
+              // so the overview keeps working where labels aren't populated.
+              const rootDisk =
+                spark.metrics.storage.find((d) => d.label === "/") ??
+                spark.metrics.storage.find((d) => d.device === "nvme0n1p2");
               if (rootDisk) {
                 return (
                   <MiniStat
@@ -165,6 +173,7 @@ function SparkCard({ spark, onSelect }: { spark: SparkSnapshot; onSelect?: (id: 
                 label={spark.metrics.llm.backend === "vllm" ? "vLLM" : spark.metrics.llm.backend ?? "LLM"}
                 value={spark.metrics.llm.modelId ?? "unknown"}
                 tone="accent"
+                title={spark.metrics.llm.modelId ?? undefined}
               />
             )}
           </div>
