@@ -19,13 +19,13 @@ sparkDash is a real-time web dashboard for one or more **NVIDIA DGX Spark (GB10)
 
 - [Features](#features)
 - [Quick start](#quick-start)
+- [Docker](#docker)
 - [Architecture](#architecture)
 - [Tech stack](#tech-stack)
 - [Repository layout](#repository-layout)
 - [REST API](#rest-api)
 - [Configuration](#configuration)
 - [Security](#security)
-- [Docker](#docker)
 - [Scripts](#scripts)
 - [How it works](#how-it-works)
 - [Contributing](#contributing)
@@ -51,44 +51,51 @@ sparkDash is a real-time web dashboard for one or more **NVIDIA DGX Spark (GB10)
 
 ## Quick start
 
-### Prerequisites
-
-- **NVIDIA DGX Spark (GB10)** or another ARM64 Linux host with an NVIDIA GPU
-- **Docker** and **Docker Compose**
-- For remote Sparks: SSH (key preferred, or password). `sshpass` is included in the image
-
-### Production (Docker)
-
 ```bash
 git clone https://github.com/MiaAI-Lab/sparkDash.git
 cd sparkDash
 
+# Production (Docker)
 docker compose up --build -d
-```
 
-Open **http://\<host-ip\>:5555**.
-
-Config and encrypted secrets live under `./config` (bind-mounted) and survive container recreation.
-
-### Development (host)
-
-```bash
+# Or development (host, with hot reload)
 npm install
 npm run dev
 ```
 
-- Vite (HMR): **http://localhost:5173**
-- Express API + WebSocket: **http://localhost:5555**
+- **Docker**: open **http://&lt;host-ip&gt;:5555**
+- **Dev**: Vite on **http://localhost:5173** (proxies API/WS to Express)
 
-Vite proxies `/api` and `/ws` to the Express server.
+---
 
-### Production from source
+## Docker
+
+### Production
 
 ```bash
-npm install
-npm run build   # frontend → dist/
-npm start       # Express serves dist/ and API on :5555
+docker compose up --build -d
 ```
+
+Open **http://&lt;host-ip&gt;:5555**.
+
+Config and encrypted secrets live under `./config` (bind-mounted) and survive container recreation.
+
+Compose highlights:
+
+- arm64 multi-stage image
+- Host mounts: `/proc`, `/sys`, `/` (read-only) for local metrics
+- `nvidia-smi` and driver libs bind-mounted for GPU queries
+- `./config` and `./server` mounted for live config and server reloads
+- `privileged: true` (nsenter / host metric access)
+- `restart: unless-stopped`
+
+### Development Compose
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+Source-mounted with Vite HMR for frontend work.
 
 ---
 
@@ -248,37 +255,6 @@ Choice is stored in `localStorage`.
 - SSH and HTTP probes use short timeouts (about 5 s SSH connect, 3 s HTTP) so a hung host cannot stall the poll loop.
 - Prefer **SSH keys** over passwords.
 - Treat the dashboard as **LAN-trusted**: the API is intentionally unauthenticated for ease of use on a private network.
-
----
-
-## Docker
-
-### Production
-
-```bash
-docker compose up --build -d
-# or
-./deploy.sh --build
-# rebuild frontend on host (dist is mounted), then recreate:
-./deploy.sh --frontend
-```
-
-Compose highlights:
-
-- arm64 multi-stage image
-- Host mounts: `/proc`, `/sys`, `/` (read-only) for local metrics
-- `nvidia-smi` and driver libs bind-mounted for GPU queries
-- `./config` and `./dist` volumes; `./server` mounted with `node --watch` for server-side reloads without image rebuild
-- `privileged: true` (nsenter / host metric access)
-- `restart: unless-stopped`
-
-### Development Compose
-
-```bash
-docker compose -f docker-compose.dev.yml up --build
-```
-
-Source-mounted with Vite HMR for frontend work.
 
 ---
 
